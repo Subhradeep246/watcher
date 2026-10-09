@@ -123,6 +123,8 @@ class Orchestrator:
             else None
         )
         merged = merge_vision(primary_v, secondary_v, target, description, seed_bbox)
+        if primary_v is None and secondary_v is None:
+            merged.context = "Detection unavailable: no validated vision model output."
         cmp = AgentComparison(agent="vision", primary=primary_run, secondary=secondary_run)
         return merged, cmp
 

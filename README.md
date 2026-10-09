@@ -80,6 +80,8 @@ The full Scan compares text agents and uses primary vision; the tracking loop us
 
 `PRIMARY_PROVIDER=auto` chooses NVIDIA if configured, then a dedicated CoreWeave endpoint. `SECONDARY_PROVIDER=auto` uses W&B; set `none` to disable comparison. `NVIDIA_DISABLE_THINKING=true` shortens the default reasoning model's responses. After two HTTP 503 overload responses, the last attempt uses `NVIDIA_FALLBACK_MODEL` (default: `meta/llama-3.2-11b-vision-instruct`); set it empty to disable fallback. Logs and model outcomes record the actual model used.
 
+The default standby uses NVIDIA's JSON-schema response format. Agent responses must contain their expected fields and pass schema validation before they are recorded as successful. An HTTP 200 with prose, a nested bounding-box fragment, or incomplete agent JSON remains an inference failure and produces an unconfirmed brief.
+
 The default W&B model is text-only. `WANDB_VISION_ENABLED=false` prevents sending it unsupported image requests; skipped calls are labelled disabled in the journal. Enable image input only with a compatible model that your account can access. Check `/v1/models` at the provider to see currently available models.
 
 No dedicated CoreWeave endpoint is required to use W&B Inference. The **CoreWeave logs** panel reports application-level inference outcomes; it does not claim to expose Kubernetes pod logs, GPU utilization, GPU temperature, or infrastructure billing. Connect your own CoreWeave deployment for infrastructure telemetry. [`deploy/coreweave/vision-gpu.yaml`](deploy/coreweave/vision-gpu.yaml) and [`watcher.yaml`](deploy/coreweave/watcher.yaml) are optional deployment templates requiring a registry image and cluster credentials.

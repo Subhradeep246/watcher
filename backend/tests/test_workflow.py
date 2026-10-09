@@ -1,5 +1,6 @@
 """Behavior checks for evidence quality, provider failures, and API integration."""
 import os
+import json
 os.environ['WEAVE_ENABLED'] = 'false'
 
 import unittest
@@ -15,6 +16,8 @@ from app.services.incident_brief import build_brief
 from app.telemetry import events, journal
 
 CAM = Camera(id='test', name='Test intersection', lat=40.75, lng=-73.98)
+VALID_VISION = json.dumps({'detected': False, 'object_class': 'vehicle', 'object_label': 'taxi',
+                          'confidence': 0, 'bounding_box': None})
 
 def observation(**kwargs):
     return WatchResponse(camera_id=CAM.id, active_camera_id=CAM.id, mode='nyc', status='tracking',
@@ -77,7 +80,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(journal()['events'][0]['agent'], 'risk')
 
     async def test_valid_provider_response_and_journal(self):
-        response = httpx.Response(200, json={'choices': [{'message': {'content': '{"ready":true}'}}], 'usage': {'total_tokens': 10}}, request=httpx.Request('POST', 'https://example.com/v1/chat/completions'))
+        response = httpx.Response(200, json={'choices': [{'message': {'content': VALID_VISION}}], 'usage': {'total_tokens': 10}}, request=httpx.Request('POST', 'https://example.com/v1/chat/completions'))
         with patch('httpx.AsyncClient.post', return_value=response):
             run = await self.p.run(system='JSON', user='test')
         self.assertTrue(run.ok)
@@ -118,7 +121,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_overload_fallback_reports_actual_model(self):
         self.p.fallback_model = 'standby-vision'
-        responses = [httpx.Response(status, json={'choices': [{'message': {'content': '{"ready":true}'}}]},
+        responses = [httpx.Response(status, json={'choices': [{'message': {'content': VALID_VISION}}]},
                                     request=httpx.Request('POST', 'https://example.com/v1/chat/completions'))
                      for status in (503, 503, 200)]
         with patch('httpx.AsyncClient.post', side_effect=responses), patch('app.providers.openai_compat.asyncio.sleep'):
@@ -127,6 +130,42 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.model, 'standby-vision')
         self.assertEqual(run.retries, 2)
         self.assertEqual(journal()['events'][0]['model'], 'standby-vision')
+
+    async def test_prose_with_nested_box_is_not_successful_detection(self):
+        text = 'Detected: True. Bounding box: {"x":400,"y":600,"width":200,"height":300}'
+        response = httpx.Response(200, json={'choices': [{'message': {'content': text}}]},
+                                  request=httpx.Request('POST', 'https://example.com/v1/chat/completions'))
+        with patch('httpx.AsyncClient.post', return_value=response):
+            run = await self.p.run(system='JSON', user='test')
+        self.assertFalse(run.ok)
+        self.assertIsNone(run.parsed)
+        self.assertEqual(run.status_code, 200)
+        self.assertFalse(journal()['events'][0]['valid_json'])
+        self.assertEqual(journal()['summary']['successes'], 0)
+
+    async def test_overload_standby_receives_detection_schema(self):
+        self.p.fallback_model = 'meta/llama-3.2-11b-vision-instruct'
+        payloads = []
+        async def post(_, **kwargs):
+            payloads.append(json.loads(json.dumps(kwargs['json'])))
+            status = 503 if len(payloads) < 3 else 200
+            return httpx.Response(status, json={'choices': [{'message': {'content': VALID_VISION}}]},
+                                  request=httpx.Request('POST', 'https://example.com/v1/chat/completions'))
+        with patch('httpx.AsyncClient.post', side_effect=post), patch('app.providers.openai_compat.asyncio.sleep'):
+            run = await self.p.run(system='JSON', user='test', image_data_uri='data:image/png;base64,test')
+        self.assertTrue(run.ok)
+        self.assertNotIn('response_format', payloads[0])
+        schema = payloads[2]['response_format']
+        self.assertEqual(schema['type'], 'json_schema')
+        self.assertIn('bounding_box', schema['json_schema']['schema']['properties'])
+
+    async def test_invalid_risk_response_is_recorded_as_failure(self):
+        response = httpx.Response(200, json={'choices': [{'message': {'content': '{"oops":true}'}}]},
+                                  request=httpx.Request('POST', 'https://example.com/v1/chat/completions'))
+        with patch('httpx.AsyncClient.post', return_value=response):
+            run = await self.p.run(system='JSON', user='test', agent='risk')
+        self.assertFalse(run.ok)
+        self.assertIn('invalid risk JSON', run.error)
 
 class APITests(unittest.TestCase):
     def test_watch_attaches_traceable_brief_and_primary_schema(self):
