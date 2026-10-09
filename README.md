@@ -25,6 +25,19 @@ npm run dev -- --host 127.0.0.1
 
 Open [the local dashboard](http://127.0.0.1:5173). Credentials belong only in the ignored `.env`; they are never bundled into the frontend. See `.env.example` for every supported setting.
 
+## Vercel deployment
+
+Deploy from the repository root. `vercel.json` uses [Vercel Services (beta)](https://vercel.com/docs/services) to build the Vite dashboard and Python 3.12 FastAPI backend together. `/api/*` reaches the backend on the same domain; all other paths serve the dashboard.
+
+Set production environment variables on the Vercel project: `NVIDIA_API_KEY`, `WANDB_API_KEY`, `WANDB_PROJECT`, and the provider/model settings in `.env.example`. Store credentials as sensitive variables and keep them out of `VITE_*` variables. `.vercelignore` excludes local environment files and dependencies from uploads. Link the intended project explicitly before deploying:
+
+```sh
+vercel link --yes --scope <team> --project <project>
+vercel --scope <team> deploy --prod
+```
+
+The inference journal is local to each running backend instance and resets on restart. Vercel can serve requests from different instances, so the journal is a recent operational view; exported browser timelines and W&B Weave traces preserve session evidence independently. API health, a live camera snapshot, and a full scan should be checked after deployment.
+
 ## Operator workflow
 
 1. Select a camera from the map, search, or shortcut chips.
