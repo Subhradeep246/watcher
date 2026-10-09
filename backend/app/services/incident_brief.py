@@ -42,6 +42,12 @@ def build_brief(result: WatchResponse, camera: Camera, *, source: str,
     elif not risk_supported:
         actions.append("Run a full Scan to assess risk against the available incident context.")
     warnings = []
+    description_review = result.description_review
+    if description_review and description_review.status == "evaluated":
+        actions.append("Compare the requested and reported descriptions with the analyzed frame; TypeSafe probabilities are advisory.")
+        warnings.append("TypeSafe checks vision-agent text, not camera pixels or cross-camera identity.")
+    elif description_review and description_review.status == "unavailable":
+        warnings.append(description_review.note)
     if handoff:
         warnings.append("Cross-camera match is unverified. The frame fingerprint belongs to the original camera.")
     if not live_evidence:

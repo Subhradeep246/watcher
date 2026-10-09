@@ -14,6 +14,7 @@ from .services.routing import route_on_roads
 from .tracing import init_tracing, tracing_enabled
 from .telemetry import journal, request_id
 from .services.incident_brief import build_brief
+from .services.description_review import DescriptionReviewer
 
 settings = get_settings()
 app = FastAPI(title="TheWatcher API", version="0.1.0")
@@ -29,6 +30,7 @@ app.add_middleware(
 nyc = NYCDataService()
 init_tracing()  # W&B Weave — before providers so their calls are traced
 orchestrator = Orchestrator()
+description_reviewer = DescriptionReviewer(settings)
 
 
 def _provider_info(p) -> dict:
@@ -51,6 +53,12 @@ async def health() -> dict:
         },
         "data": {
             "ny511_live": bool(settings.ny511_api_key),
+        },
+        "description_review": {
+            "enabled": description_reviewer.enabled,
+            "provider": "TypeSafe",
+            "model": settings.typesafe_model,
+            "scope": "Full Scan; text consistency, operator review only",
         },
         "snapshot_interval_ms": 2000,
     }
@@ -115,6 +123,7 @@ async def watch(req: WatchRequest) -> WatchResponse:
     token = request_id.set(trace_id)
     try:
         result = await orchestrator.run(req, cam, incidents, all_cams, nyc)
+        result.description_review = await description_reviewer.review(req, result)
         result.brief = build_brief(result, cam, source=source, image=req.image_data_uri,
                                   incidents=incidents, trace_id=trace_id)
         return result

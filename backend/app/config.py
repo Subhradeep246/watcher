@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     wandb_vision_enabled: bool = False
     weave_enabled: bool = True
 
+    # Optional text-only description review; credentials remain server-side.
+    typesafe_api_key: str = ""
+    typesafe_model: str = "jev-latest"
+
     # NYC data
     ny511_api_key: str = ""
     socrata_app_token: str = ""

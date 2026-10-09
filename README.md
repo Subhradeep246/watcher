@@ -66,6 +66,8 @@ flowchart LR
     NIM --> Agents[Vision / Tracker / Prediction / Risk]
     WB --> Agents
     Agents --> Brief[Evidence brief + timeline export]
+    Agents --> TS[Optional TypeSafe text consistency review]
+    TS --> Brief
     Agents --> Journal[Inference journal + W&B Weave]
     Brief --> UI
     Journal --> UI
@@ -81,6 +83,7 @@ The full Scan compares text agents and uses primary vision; the tracking loop us
 | W&B Inference | Text-agent comparison, on CoreWeave GPUs | `meta-llama/Llama-3.1-8B-Instruct` |
 | W&B Weave | Agent/model traces with images omitted from inputs | `WANDB_PROJECT=<entity>/<project>` |
 | CoreWeave endpoint | Optional self-hosted primary vision | `Qwen/Qwen2.5-VL-7B-Instruct` |
+| TypeSafe | Optional reported-description consistency review | `jev-latest` |
 
 `PRIMARY_PROVIDER=auto` chooses NVIDIA if configured, then a dedicated CoreWeave endpoint. `SECONDARY_PROVIDER=auto` uses W&B; set `none` to disable comparison. `NVIDIA_DISABLE_THINKING=true` shortens the default reasoning model's responses. After two HTTP 503 overload responses, the last attempt uses `NVIDIA_FALLBACK_MODEL` (default: `meta/llama-3.2-11b-vision-instruct`); set it empty to disable fallback. Logs and model outcomes record the actual model used.
 
@@ -89,6 +92,20 @@ The default standby uses NVIDIA's JSON-schema response format. Agent responses m
 The default W&B model is text-only. `WANDB_VISION_ENABLED=false` prevents sending it unsupported image requests; skipped calls are labelled disabled in the journal. Enable image input only with a compatible model that your account can access. Check `/v1/models` at the provider to see currently available models.
 
 No dedicated CoreWeave endpoint is required to use W&B Inference. The **CoreWeave logs** panel reports application-level inference outcomes; it does not claim to expose Kubernetes pod logs, GPU utilization, GPU temperature, or infrastructure billing. Connect your own CoreWeave deployment for infrastructure telemetry. [`deploy/coreweave/vision-gpu.yaml`](deploy/coreweave/vision-gpu.yaml) and [`watcher.yaml`](deploy/coreweave/watcher.yaml) are optional deployment templates requiring a registry image and cluster credentials.
+
+## TypeSafe description review
+
+The [TypeSafe skill](.agents/skills/typesafe-ai/SKILL.md) is installed for Codex in this repository with a pinned source hash in `skills-lock.json`. `AGENTS.md` instructs future project work to use it. Installation used one method:
+
+```sh
+npx skills add typesafe-ai/skills --skill typesafe-ai --agent codex --yes
+```
+
+Set the separate server-side `TYPESAFE_API_KEY` in `.env` to enable the review; `TYPESAFE_MODEL` defaults to `jev-latest`. NVIDIA and W&B credentials do not enable TypeSafe. The integration follows the [live HTTP API](https://docs.typesafe.ai/api), [Noul guidance](https://docs.typesafe.ai/primitives/noul), and [citation-checking pattern](https://docs.typesafe.ai/cookbooks/citation_check).
+
+After a successful full **Scan** detection, one request asks two independent questions about the requested target and the vision agent's reported visible appearance: does a feature explicitly conflict, and are all requested visible distinguishing features reported? Both raw probabilities appear in **Brief**, the evidence export, and the API's `description_review` field. Low contradiction alone does not establish a match; generic or missing detail can still have low coverage. A value near 50% reflects uncertainty between yes and no. The check receives text, never camera pixels, identity hints, or scene-motion claims. It cannot detect a description that is internally consistent but visually wrong.
+
+The review is advisory: probabilities do not change target locks, camera handoffs, or risk priority. Thresholds need evaluation on labeled camera data before any automatic decisions. Fast tracking skips this request to preserve its latency budget. Missing keys are labelled `not_configured`; absent or failed vision results are `skipped`; service or contract failures are `unavailable`. Requests have an eight-second overall deadline, with at most one retry for HTTP 429/529. Metadata-only journal entries report actual model, latency, tokens, status and retry count. `/api/health` reports configuration without testing the credential. Live TypeSafe accuracy has not been evaluated without a TypeSafe key.
 
 ## Data provenance
 

@@ -52,3 +52,17 @@ These follow-up changes run locally; the Vercel checks above describe the earlie
 ## Practical limits
 
 Provider load and changing traffic can affect detections and latency. A cross-camera handoff is a visual matching hypothesis rather than verified identity. The supplied setup has no dedicated CoreWeave cluster endpoint or incident-data keys: infrastructure GPU metrics and real-world hazard assessment are therefore unavailable. The journal contains real application-level W&B/CoreWeave inference outcomes, and sample context is labelled. Docker and the optional Kubernetes manifests were not deployed.
+
+## TypeSafe skill and description review follow-up
+
+Installed `typesafe-ai` for Codex using `npx skills add typesafe-ai/skills --skill typesafe-ai --agent codex --yes`. The project includes the installed MIT-licensed skill, source hash lock, and `AGENTS.md` guidance. The live documentation index, HTTP API, Noul guidance, and citation-checking cookbook informed the implementation.
+
+Optional full-Scan description review sends one text-only TypeSafe request containing two independent Noul questions: explicit feature contradiction and coverage of requested distinguishing visible features. The review returns validated probabilities, actual model, latency and usage. It remains advisory, with no automatic tracking, handoff or risk decisions. Fast tracking does not add this request. The overall deadline is eight seconds, with at most one overload/rate-limit retry.
+
+- **36 behavior tests passed**, including 13 new tests for configuration, batching, state boundaries, conflicting/matching/uncertain mocked judgments, missing evidence, malformed probabilities, authentication failures, timeouts, retries, input budgets, advisory brief behavior, and the full API response flow.
+- **Frontend production build passed** after the final changes; `git diff --check` passed.
+- **Local health reports TypeSafe disabled** while NVIDIA, W&B and Weave remain configured. No TypeSafe API key was provided; no live TypeSafe judgment or accuracy evaluation was performed. Mocked answer fixtures establish contract and policy behavior, not semantic model accuracy.
+- **A real browser Scan exercised the failure path** at about 5:53 PM Eastern. NVIDIA retried twice and used the standby; the final HTTP 200 response failed vision-schema validation. The UI correctly displayed Lost / Verify, with TypeSafe explicitly **not configured** and no invented review probabilities. This run does not establish a successful detection.
+- **Browser evidence export included `description_review.status=not_configured`**, null probabilities, and no image pixels. No browser console errors were observed. Screenshot: [`typesafe-review.png`](screenshots/typesafe-review.png).
+
+These changes run locally. The production deployment described above still predates both local follow-up changes.
