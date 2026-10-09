@@ -1,0 +1,63 @@
+# Self-hosted Gemma vision model on a CoreWeave GPU node (OpenAI-compatible).
+# TheWatcher points at it with:
+#   PRIMARY_PROVIDER=coreweave
+#   COREWEAVE_BASE_URL=http://gemma-gpu.thewatcher.svc.cluster.local:8000/v1
+#
+# Create the HF token secret first (Gemma weights are gated):
+#   kubectl -n thewatcher create secret generic hf-token --from-literal=HF_TOKEN=hf_xxx
+#
+# Prefer an NVIDIA NIM container? Swap the image for the model's NIM image from
+# build.nvidia.com (nvcr.io/nim/...) and set NGC_API_KEY instead of HF_TOKEN —
+# it serves the same /v1/chat/completions API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gemma-gpu
+  namespace: thewatcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: gemma-gpu }
+  template:
+    metadata:
+      labels: { app: gemma-gpu }
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.10.1
+          args:
+            - --model=google/gemma-4-31B-it
+            - --served-model-name=google/gemma-4-31B-it
+            - --max-model-len=16384
+            - --limit-mm-per-prompt={"image":1}
+          env:
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef: { name: hf-token, key: HF_TOKEN }
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: 96Gi
+              cpu: "8"
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 120
+            periodSeconds: 10
+          volumeMounts:
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 16Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gemma-gpu
+  namespace: thewatcher
+spec:
+  selector: { app: gemma-gpu }
+  ports:
+    - port: 8000
+      targetPort: 8000

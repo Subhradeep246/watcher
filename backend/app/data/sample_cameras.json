@@ -1,0 +1,42 @@
+[
+  {
+    "id": "nyc-001",
+    "name": "7th Ave @ W 34th St (Midtown)",
+    "lat": 40.7505,
+    "lng": -73.9905,
+    "roads": ["7th Ave", "W 34th St"],
+    "image_url": null
+  },
+  {
+    "id": "nyc-002",
+    "name": "Broadway @ Times Sq (W 45th St)",
+    "lat": 40.7580,
+    "lng": -73.9855,
+    "roads": ["Broadway", "7th Ave", "W 45th St"],
+    "image_url": null
+  },
+  {
+    "id": "nyc-003",
+    "name": "Canal St @ Bowery (Chinatown)",
+    "lat": 40.7180,
+    "lng": -73.9970,
+    "roads": ["Canal St", "Bowery"],
+    "image_url": null
+  },
+  {
+    "id": "nyc-004",
+    "name": "5th Ave @ E 42nd St (NYPL)",
+    "lat": 40.7529,
+    "lng": -73.9819,
+    "roads": ["5th Ave", "E 42nd St"],
+    "image_url": null
+  },
+  {
+    "id": "nyc-005",
+    "name": "Brooklyn Bridge Manhattan Approach",
+    "lat": 40.7061,
+    "lng": -73.9969,
+    "roads": ["Centre St", "Brooklyn Bridge"],
+    "image_url": null
+  }
+]

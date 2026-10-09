@@ -1,0 +1,46 @@
+# TheWatcher app (FastAPI + built SPA) on CoreWeave Kubernetes Service (CKS).
+#
+#   docker build -t <registry>/thewatcher:latest . && docker push <registry>/thewatcher:latest
+#   kubectl create namespace thewatcher
+#   kubectl -n thewatcher create secret generic watcher-env --from-env-file=.env
+#   kubectl apply -f deploy/coreweave/
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thewatcher
+  namespace: thewatcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: thewatcher }
+  template:
+    metadata:
+      labels: { app: thewatcher }
+    spec:
+      containers:
+        - name: app
+          image: REPLACE_ME/thewatcher:latest
+          envFrom:
+            - secretRef: { name: watcher-env }
+          env:
+            - { name: PORT, value: "8000" }
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8000 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: thewatcher
+  namespace: thewatcher
+spec:
+  type: LoadBalancer
+  selector: { app: thewatcher }
+  ports:
+    - port: 80
+      targetPort: 8000
