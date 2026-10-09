@@ -72,7 +72,7 @@ def track_description(
     identity_hint: str | None,
     appearance: str | None = None,
 ) -> str:
-    """Full re-ID string sent to the vision model on nearby cameras and follow-up frames."""
+    """Full re-ID string sent to Primary on nearby cameras and follow-up frames."""
     parts: list[str] = []
     if appearance:
         parts.append(appearance)

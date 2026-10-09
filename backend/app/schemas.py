@@ -18,7 +18,7 @@ class VisionResult(BaseModel):
     object_label: str
     object_class: Literal["person", "vehicle", "other"] = "other"
     detected: bool = True
-    confidence: float = 0.0
+    confidence: float = Field(default=0.0, ge=0, le=1)
     bounding_box: Optional[BoundingBox] = None
     context: str = ""
     # Rich visual signature for re-ID across cameras (clothing, stickers, colors…).
@@ -41,7 +41,7 @@ class TrackerResult(BaseModel):
 
 class PathPrediction(BaseModel):
     direction: str
-    probability: float
+    probability: float = Field(ge=0, le=1)
 
 
 class PredictionResult(BaseModel):
@@ -50,7 +50,7 @@ class PredictionResult(BaseModel):
 
 class PathRisk(BaseModel):
     direction: str
-    risk_score: float
+    risk_score: float = Field(ge=0, le=1)
     reason: str = ""
 
 
@@ -58,9 +58,12 @@ class RiskResult(BaseModel):
     path_risks: list[PathRisk] = Field(default_factory=list)
 
 
-# ---- Provider run metadata (for the side-by-side model comparison) --------
+# ---- Provider run metadata --------------------------------------------
 class ModelRun(BaseModel):
     provider: Literal["primary", "secondary"]
+    host: str = ""
+    status_code: Optional[int] = None
+    retries: int = 0
     model: str
     ok: bool
     mocked: bool = False
@@ -110,6 +113,24 @@ class CameraSighting(BaseModel):
     bounding_box: Optional[BoundingBox] = None
 
 
+class IncidentBrief(BaseModel):
+    id: str
+    created_at: str
+    title: str
+    priority: Literal["verify", "observe", "review"]
+    frame_source: str
+    frame_sha256: Optional[str] = None
+    camera_name: str
+    confidence: float
+    summary: str
+    actions: list[str]
+    limitations: list[str]
+    incident_context: list[str]
+    risk_supported: bool
+    risk_peak: Optional[float] = None
+    evidence: list[str]
+
+
 class WatchResponse(BaseModel):
     camera_id: str
     active_camera_id: str
@@ -118,7 +139,7 @@ class WatchResponse(BaseModel):
     status: Literal["tracking", "searching", "lost", "idle"] = "idle"
     # How many other feeds were scanned for the object this tick.
     searching_count: int = 0
-    # The "primary" merged result (primary preferred, secondary fallback).
+    # The merged vision result from configured providers.
     vision: Optional[VisionResult] = None
     tracker: Optional[TrackerResult] = None
     prediction: Optional[PredictionResult] = None
@@ -131,6 +152,7 @@ class WatchResponse(BaseModel):
     comparisons: list[AgentComparison] = Field(default_factory=list)
     # Human-readable control-room log lines.
     log: list[str] = Field(default_factory=list)
+    brief: Optional[IncidentBrief] = None
 
 
 class Camera(BaseModel):

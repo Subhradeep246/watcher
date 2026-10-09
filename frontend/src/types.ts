@@ -78,6 +78,7 @@ export interface WatchResponse {
   sightings?: CameraSighting[];
   comparisons: AgentComparison[];
   log: string[];
+  brief: IncidentBriefData | null;
 }
 
 export interface CameraSighting {
@@ -94,10 +95,39 @@ export interface CameraSighting {
 export interface Health {
   status: string;
   providers: {
+    // Slot keys: primary = primary model, secondary = comparison model.
     primary: { enabled: boolean; model: string; label: string };
     secondary: { enabled: boolean; model: string; label: string };
   };
   tracing?: { weave: boolean; project: string };
   data: { ny511_live: boolean };
   snapshot_interval_ms?: number;
+}
+
+export interface IncidentBriefData {
+  id: string;
+  created_at: string;
+  title: string;
+  priority: "verify" | "observe" | "review";
+  frame_source: string;
+  frame_sha256: string | null;
+  camera_name: string;
+  confidence: number;
+  summary: string;
+  actions: string[];
+  limitations: string[];
+  incident_context: string[];
+  risk_supported: boolean;
+  risk_peak: number | null;
+  evidence: string[];
+}
+export interface Telemetry {
+  events: {
+    id: string; request_id: string; timestamp: string; agent: string;
+    slot: string; host: string; model: string; ok: boolean; mocked: boolean;
+    latency_ms: number; total_tokens: number | null; valid_json: boolean;
+    status_code: number | null; retries: number; error: string | null;
+  }[];
+  summary: { calls: number; successes: number; tokens: number; p95_ms: number | null };
+  retention: string;
 }

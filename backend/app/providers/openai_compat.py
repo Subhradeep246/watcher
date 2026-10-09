@@ -16,6 +16,7 @@ import httpx
 from ..config import get_settings
 from ..schemas import ModelRun
 from ..tracing import traced
+from ..telemetry import observed
 from .base import LLMProvider, extract_json
 
 
@@ -31,6 +32,8 @@ class OpenAICompatProvider(LLMProvider):
         extra_headers: Optional[dict[str, str]] = None,
         extra_body: Optional[dict] = None,
         key_hint: str = "API key",
+        supports_vision: bool = True,
+        fallback_model: str = "",
     ) -> None:
         # `slot` is the wire key the UI uses: "primary" = primary, "secondary" = secondary.
         self.name = slot
@@ -41,8 +44,11 @@ class OpenAICompatProvider(LLMProvider):
         self.extra_headers = extra_headers or {}
         self.extra_body = extra_body or {}
         self.key_hint = key_hint
+        self.supports_vision = supports_vision
+        self.fallback_model = fallback_model
         self.enabled = bool(self.api_key and self.base_url and self.model)
 
+    @observed
     @traced
     async def run(
         self,
@@ -51,6 +57,7 @@ class OpenAICompatProvider(LLMProvider):
         user: str,
         image_data_uri: Optional[str] = None,
         reasoning_effort: str = "default",
+        agent: str = "vision",
     ) -> ModelRun:
         if not self.enabled:
             return ModelRun(
@@ -61,6 +68,10 @@ class OpenAICompatProvider(LLMProvider):
                 raw_text="",
                 error=f"{self.key_hint} not set — {self.label} disabled",
             )
+
+        if image_data_uri and not self.supports_vision:
+            return ModelRun(provider=self.name, model=self.model, ok=False, mocked=True,
+                            error=f"{self.label}: image input disabled for this model; text agents remain live")
 
         content: list[dict] | str
         if image_data_uri:
@@ -86,6 +97,7 @@ class OpenAICompatProvider(LLMProvider):
 
         headers = {"Authorization": f"Bearer {self.api_key}", **self.extra_headers}
         start = time.perf_counter()
+        attempt = 0
         try:
             async with httpx.AsyncClient(timeout=60) as client:
                 # Retry transient rate-limit / overload responses with backoff.
@@ -96,6 +108,9 @@ class OpenAICompatProvider(LLMProvider):
                         json=payload,
                     )
                     if resp.status_code in (429, 503) and attempt < 2:
+                        if resp.status_code == 503 and attempt == 1 and self.fallback_model:
+                            payload["model"] = self.fallback_model
+                            payload.pop("chat_template_kwargs", None)
                         await asyncio.sleep(1.5 * (attempt + 1))
                         continue
                     break
@@ -106,8 +121,10 @@ class OpenAICompatProvider(LLMProvider):
             usage = data.get("usage") or {}
             return ModelRun(
                 provider=self.name,
-                model=self.model,
+                model=payload["model"],
                 ok=True,
+                status_code=resp.status_code,
+                retries=attempt,
                 latency_ms=latency,
                 prompt_tokens=usage.get("prompt_tokens"),
                 completion_tokens=usage.get("completion_tokens"),
@@ -117,21 +134,21 @@ class OpenAICompatProvider(LLMProvider):
             )
         except Exception as exc:  # noqa: BLE001 — surface any failure to the UI
             latency = int((time.perf_counter() - start) * 1000)
-            detail = ""
-            if isinstance(exc, httpx.HTTPStatusError):
-                detail = f" — {exc.response.text[:300]}"
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
             return ModelRun(
                 provider=self.name,
-                model=self.model,
+                model=payload["model"],
                 ok=False,
+                status_code=status,
+                retries=attempt,
                 latency_ms=latency,
                 raw_text="",
-                error=f"{type(exc).__name__}: {exc}{detail}",
+                error=f"{self.label}: HTTP {status}" if status else f"{self.label}: {type(exc).__name__}",
             )
 
 
 def build_primary() -> LLMProvider:
-    """Primary vision model: NVIDIA NIM, or a CoreWeave self-hosted endpoint."""
+    """Primary vision model: NVIDIA NIM or CoreWeave self-hosted."""
     s = get_settings()
     choice = s.resolved_primary
     if choice == "nvidia":
@@ -149,31 +166,35 @@ def build_primary() -> LLMProvider:
                 else None
             ),
             key_hint="NVIDIA_API_KEY",
+            fallback_model=s.nvidia_fallback_model,
         )
-    return OpenAICompatProvider(
-        slot="primary",
-        label="CoreWeave GPU",
-        base_url=s.coreweave_base_url,
-        # vLLM/NIM accept any bearer when auth is off; keep the provider enabled.
-        api_key=s.coreweave_api_key or "none",
-        model=s.coreweave_model,
-        key_hint="COREWEAVE_BASE_URL",
-    )
+    if choice == "coreweave":
+        return OpenAICompatProvider(
+            slot="primary",
+            label="CoreWeave GPU",
+            base_url=s.coreweave_base_url,
+            # vLLM/NIM accept any bearer when auth is off; keep the provider enabled.
+            api_key=s.coreweave_api_key or "none",
+            model=s.coreweave_model,
+            key_hint="COREWEAVE_BASE_URL",
+        )
+    raise ValueError(f"Unsupported primary provider: {choice}")
 
 
 def build_secondary() -> Optional[LLMProvider]:
-    """Comparison model: W&B Inference (CoreWeave GPUs), or none."""
+    """Comparison model: W&B Inference (CoreWeave) or none."""
     s = get_settings()
     choice = s.resolved_secondary
     if choice == "wandb":
         headers = {"OpenAI-Project": s.wandb_project} if s.wandb_project else {}
         return OpenAICompatProvider(
             slot="secondary",
-            label="W&B Inference",
+            label="W&B Inference · CoreWeave",
             base_url=s.wandb_inference_base_url,
             api_key=s.wandb_api_key,
             model=s.wandb_inference_model,
             extra_headers=headers,
             key_hint="WANDB_API_KEY",
+            supports_vision=s.wandb_vision_enabled,
         )
     return None

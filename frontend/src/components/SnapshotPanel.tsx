@@ -103,6 +103,7 @@ export default function SnapshotPanel({
   useEffect(() => {
     lastAutoTrackTick.current = -1;
     setFrameSize(null);
+    setDisplaySrc(null);
   }, [camera?.id]);
 
   useEffect(() => {
@@ -130,13 +131,16 @@ export default function SnapshotPanel({
       return;
     }
     setRefreshing(true);
+    let cancelled = false;
     const img = new Image();
     img.onload = () => {
+      if (cancelled) return;
       setDisplaySrc(nextSrc);
       setRefreshing(false);
     };
-    img.onerror = () => setRefreshing(false);
+    img.onerror = () => { if (!cancelled) setRefreshing(false); };
     img.src = nextSrc;
+    return () => { cancelled = true; };
   }, [nextSrc, camera]);
 
   useEffect(() => {
@@ -149,12 +153,14 @@ export default function SnapshotPanel({
 
   const tryAutoTrack = useCallback(() => {
     if (!followingPick || !onFrameTrack || trackBusy || !imgRef.current) return;
+    if (!imgRef.current.complete || !imgRef.current.naturalWidth) return;
+    if (isLive && !imgRef.current.src.includes(`/api/cameras/${camera?.id}/snapshot`)) return;
     if (tick === lastAutoTrackTick.current) return;
     const uri = captureImageDataUri(imgRef.current);
     if (!uri) return;
     lastAutoTrackTick.current = tick;
     onFrameTrack(uri, tick);
-  }, [followingPick, onFrameTrack, trackBusy, tick]);
+  }, [followingPick, onFrameTrack, trackBusy, tick, isLive, camera?.id]);
 
   const onImgLoad = useCallback(() => {
     setRefreshing(false);
@@ -226,13 +232,13 @@ export default function SnapshotPanel({
         <div className="snapshot-overlay-top">
           <span className={`track-pill track-pill-${trackStatus}`}>
             {trackStatus === "idle" && "Click object to track"}
-            {trackStatus === "locking" && "AI locking…"}
+            {trackStatus === "locking" && "Locking target…"}
             {trackStatus === "tracking" && "Tracking"}
             {trackStatus === "searching" && "Searching nearby feeds…"}
             {trackStatus === "lost" && "Lost — click again"}
           </span>
           {isLive && <span className="pill pill-live">~2s</span>}
-          {trackBusy && <span className="pill pill-ai">AI</span>}
+          {trackBusy && <span className="pill pill-primary">INFERENCE</span>}
         </div>
 
         {result?.vision && (

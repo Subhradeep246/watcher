@@ -6,11 +6,12 @@ import SnapshotPanel from "./components/SnapshotPanel";
 import NearbyFeeds from "./components/NearbyFeeds";
 import CameraSearch from "./components/CameraSearch";
 import AgentChat from "./components/AgentChat";
-import ComparisonView from "./components/ComparisonView";
+import InferenceLogs from "./components/InferenceLogs";
+import IncidentBrief from "./components/IncidentBrief";
 import { judgePickCameras, pickDefaultCamera } from "./utils/cameras";
 
 type Mode = "nyc" | "factory" | "hospital";
-type Tab = "log" | "models";
+type Tab = "log" | "models" | "brief";
 type TrackStatus = "idle" | "locking" | "tracking" | "searching" | "lost";
 
 function visionTrackLabel(v: WatchResponse["vision"]): string {
@@ -31,7 +32,8 @@ export default function App() {
   const [selected, setSelected] = useState<Camera | null>(null);
   const [description, setDescription] = useState("");
   const [mode] = useState<Mode>("nyc");
-  const [tab, setTab] = useState<Tab>("log");
+  const [tab, setTab] = useState<Tab>("brief");
+  const [history, setHistory] = useState<WatchResponse[]>([]);
   const [result, setResult] = useState<WatchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [tracking, setTracking] = useState(false);
@@ -68,7 +70,7 @@ export default function App() {
   const judgeCams = judgePickCameras(cameras);
   const primaryOn = health?.providers.primary.enabled;
   const primaryLabel = health?.providers.primary.label ?? "NVIDIA NIM";
-  const secondaryLabel = health?.providers.secondary.label ?? "W&B Inference";
+
 
   const appendLog = useCallback((lines: string[]) => {
     if (!lines.length) return;
@@ -99,6 +101,7 @@ export default function App() {
   const applyResult = useCallback(
     (res: WatchResponse) => {
       setResult(res);
+      setHistory(prev => [...prev, res].slice(-60));
       appendLog(res.log ?? []);
     },
     [appendLog]
@@ -139,6 +142,8 @@ export default function App() {
     (c: Camera) => {
       resetTrack();
       setActivityLog([]);
+      setHistory([]);
+      setResult(null);
       setSelected(c);
     },
     [resetTrack]
@@ -148,6 +153,12 @@ export default function App() {
   const viewCamera = useCallback(
     (c: Camera) => {
       if (followingPick) {
+        runGen.current += 1;
+        trackInFlight.current = false;
+        setLoading(false);
+        setTracking(false);
+        setPickSeed(null);
+        pickSeedRef.current = null;
         setSelected(c);
       } else {
         selectCamera(c);
@@ -168,7 +179,7 @@ export default function App() {
         if (next && next.id !== selected?.id) {
           setHandoffNotice(res.handoff.reason);
           // Carry the matched box onto the new camera so we keep tracking it.
-          const box = res.vision?.bounding_box ?? null;
+          const box = res.sightings?.find(s => s.camera_id === next.id && s.detected)?.bounding_box ?? (res.active_camera_id === next.id ? res.vision?.bounding_box ?? null : null);
           setPickSeed(box);
           pickSeedRef.current = box;
           setSelected(next);
@@ -377,7 +388,7 @@ export default function App() {
         </div>
       </header>
 
-      {!primaryOn && (
+      {health && !primaryOn && (
         <div className="judge-warn">
           Set <code>NVIDIA_API_KEY</code> (or <code>COREWEAVE_BASE_URL</code>) in backend/.env
         </div>
@@ -497,8 +508,9 @@ export default function App() {
 
         <section className="panel panel-output">
           <header className="panel-head panel-head-tabs">
-            <h2>Log</h2>
+            <h2>Control room</h2>
             <div className="tab-group">
+              <button type="button" className={tab === "brief" ? "active" : ""} onClick={() => setTab("brief")}>Brief</button>
               <button
                 type="button"
                 className={tab === "log" ? "active" : ""}
@@ -511,19 +523,17 @@ export default function App() {
                 className={tab === "models" ? "active" : ""}
                 onClick={() => setTab("models")}
               >
-                Models
+                CoreWeave logs
               </button>
             </div>
           </header>
           <div className="panel-content">
             {tab === "log" ? (
               <AgentChat log={activityLog} />
+            ) : tab === "brief" ? (
+              <IncidentBrief history={history} />
             ) : (
-              <ComparisonView
-                comparisons={result?.comparisons ?? []}
-                primaryLabel={primaryLabel}
-                secondaryLabel={secondaryLabel}
-              />
+              <InferenceLogs />
             )}
           </div>
         </section>

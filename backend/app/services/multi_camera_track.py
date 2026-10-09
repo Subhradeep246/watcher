@@ -1,4 +1,4 @@
-"""Scan nearby NYC DOT cameras for the same tracked object (vision-model re-ID)."""
+"""Scan nearby NYC DOT cameras for the same tracked object (Primary re-ID)."""
 from __future__ import annotations
 
 import asyncio
@@ -172,7 +172,7 @@ async def scan_nearby_cameras(
     route_cam: Optional[Camera] = None,
     force: bool = False,
 ) -> list[CameraSighting]:
-    """Vision-model re-ID across predicted-route + nearby feeds.
+    """Primary re-ID across predicted-route + nearby feeds.
 
     When ``force`` is set the scan runs even if the object is no longer on the
     current feed — this is how we keep looking for it after it leaves frame.
