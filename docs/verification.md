@@ -4,7 +4,7 @@ The frontend runs at http://127.0.0.1:5173 and the backend at http://127.0.0.1:8
 
 ## Checks performed
 
-- **16 behavior tests passed** with `PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v`, including three added checks for malformed output, risk schema validation, and standby schema generation.
+- **23 behavior tests passed** with `PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v`, covering malformed output, risk schema validation, standby generation, clicked-target containment, class mismatch, position jumps, camera-scan opt-out, and unverified handoffs.
 - **Production frontend build passed** with `npm run build --prefix frontend`.
 - **982 online NYC cameras loaded** through the public DOT catalog; live nearby and main-feed snapshots rendered in the browser.
 - **NVIDIA multimodal inference returned HTTP 200** with `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`. The alternative `meta/llama-3.2-11b-vision-instruct` also accepted image input in a live probe.
@@ -36,6 +36,18 @@ Production code commit: `68aa6a0`. Deployment: `dpl_C9vWBRCSWGGXhe65CWGzTUFBuLqy
 - Incident context remained sample data; the brief kept `risk_supported=false` and did not present model confidence as proof of a hazard or identity.
 
 Anonymous browser access reaches the Vercel login page. A temporary login-free share URL was not created because automatic approval review rejected expanding access without explicit user authorization. This does not affect authenticated deployment operation.
+
+## Local description accuracy follow-up
+
+Checking actual frames exposed stale detection boxes over newer live images, unwanted nearby searches after a failed initial detection, and unsupported appearance details. The local fixes capture the displayed image for Scan, offer **View analyzed frame**, show boxes only on that exact image, retain the requested description after unsuccessful detections, and mark proposed handoffs as unverified. Failed initial vision cannot start a handoff; `skip_camera_scan=true` is respected on the fast path. Wrong target classes, boxes away from the clicked point, and large lock jumps are rejected.
+
+The final shorter prompts were tested against one saved 7 Ave @ 34 St snapshot. NVIDIA correctly described the visible white box truck as “white box truck with white cab and white cargo box,” with a normalized box at `(0, 585, 325, 415)` matching the bottom-left foreground. An absent purple double-decker bus returned `detected=false`, zero confidence, no box, and no appearance or identity hint. Earlier responses had incorrect placement or speculative details; these results are observations on one frame, not a general accuracy benchmark.
+
+The browser's absent-target Scan kept the entered description, displayed Verify, and provided the exact analyzed frame. Its exported SHA-256 matched the displayed analyzed image data URI, and the export contained no image pixels. Returning to live removed historical boxes. No browser console errors were observed, and the frontend production build passed. Screenshot: [`analyzed-frame.png`](screenshots/analyzed-frame.png).
+
+A final full local Scan on the saved truck image returned HTTP 200 with **7/7 active inference calls successful** across vision, tracker, prediction, and risk. Vision localized the foreground truck at `(0, 580, 320, 420)`, and the tracker used the correct 7 Ave / 34 St camera metadata. The three W&B text comparisons succeeded. Motion and path outputs remain estimates from camera geometry and a single snapshot; incident risk remained unverified because its context was sample data.
+
+These follow-up changes run locally; the Vercel checks above describe the earlier deployed commit.
 
 ## Practical limits
 

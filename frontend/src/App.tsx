@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getCameras, getHealth, watch, track } from "./api";
 import type { BoundingBox, Camera, Health, WatchResponse } from "./types";
 import MapView from "./components/MapView";
-import SnapshotPanel from "./components/SnapshotPanel";
+import SnapshotPanel, { type AnalyzedFrame } from "./components/SnapshotPanel";
 import NearbyFeeds from "./components/NearbyFeeds";
 import CameraSearch from "./components/CameraSearch";
 import AgentChat from "./components/AgentChat";
@@ -51,6 +51,11 @@ export default function App() {
   const trackInFlight = useRef(false);
   // Bumped on every Stop / camera switch so in-flight requests can be discarded.
   const runGen = useRef(0);
+  const latestFrame = useRef<AnalyzedFrame | null>(null);
+  const [analysisFrame, setAnalysisFrame] = useState<AnalyzedFrame | null>(null);
+  const onFrameAvailable = useCallback((imageUri: string) => {
+    if (selected) latestFrame.current = { cameraId: selected.id, imageUri, capturedAt: Date.now() };
+  }, [selected]);
 
   useEffect(() => {
     pickSeedRef.current = pickSeed;
@@ -144,6 +149,8 @@ export default function App() {
       setActivityLog([]);
       setHistory([]);
       setResult(null);
+      setAnalysisFrame(null);
+      latestFrame.current = null;
       setSelected(c);
     },
     [resetTrack]
@@ -160,6 +167,8 @@ export default function App() {
         setPickSeed(null);
         pickSeedRef.current = null;
         setSelected(c);
+        setAnalysisFrame(null);
+        latestFrame.current = null;
       } else {
         selectCamera(c);
       }
@@ -170,7 +179,7 @@ export default function App() {
   const applyHandoff = useCallback(
     (res: WatchResponse) => {
       const label = visionTrackLabel(res.vision);
-      if (label) {
+      if (label && res.vision?.detected) {
         trackLabelRef.current = label;
         setDescription(label);
       }
@@ -212,7 +221,7 @@ export default function App() {
     else if (st === "lost") setTrackStatus("lost");
     else if (res.vision?.detected) setTrackStatus("tracking");
     const label = visionTrackLabel(res.vision);
-    if (label) trackLabelRef.current = label;
+    if (label && res.vision?.detected) trackLabelRef.current = label;
   }, []);
 
   const runTrack = useCallback(
@@ -220,6 +229,7 @@ export default function App() {
       if (!selected || trackInFlight.current) return;
       if (!followingPick && !trackingActive.current) return;
       const gen = runGen.current;
+      const frame = imageUri ? { cameraId: selected.id, imageUri, capturedAt: latestFrame.current?.capturedAt ?? Date.now() } : null;
       trackInFlight.current = true;
       setTracking(true);
       try {
@@ -229,6 +239,7 @@ export default function App() {
         });
         if (gen !== runGen.current) return;
         applyResult(res);
+        setAnalysisFrame(frame && res.active_camera_id === frame.cameraId ? frame : null);
         trackingActive.current = true;
         applyVision(res);
         extendTrail(res);
@@ -249,15 +260,17 @@ export default function App() {
   const runWatch = useCallback(async () => {
     if (!selected) return;
     const gen = runGen.current;
+    const frame = latestFrame.current?.cameraId === selected.id ? latestFrame.current : null;
     setLoading(true);
     setError(null);
     try {
-      const res = await watch({ ...payloadBase(), fast: false });
+      const res = await watch({ ...payloadBase(), image_data_uri: frame?.imageUri, fast: false });
       if (gen !== runGen.current) return;
       applyResult(res);
+      setAnalysisFrame(frame && res.active_camera_id === frame.cameraId ? frame : null);
       trackingActive.current = true;
       applyVision(res);
-      if (res.vision?.object_label) {
+      if (res.vision?.detected && res.vision.object_label) {
         setDescription(visionTrackLabel(res.vision));
       }
       applyHandoff(res);
@@ -269,7 +282,7 @@ export default function App() {
   }, [selected, payloadBase, applyHandoff, applyVision, applyResult]);
 
   const onPickObject = useCallback(
-    async (box: BoundingBox, imageUri: string | null) => {
+    async (box: BoundingBox, imageUri: string | null, capturedAt?: number) => {
       if (!selected || trackInFlight.current) return;
       setPickSeed(box);
       pickSeedRef.current = box;
@@ -280,6 +293,7 @@ export default function App() {
       trackLabelRef.current = "";
       trackInFlight.current = true;
       const gen = runGen.current;
+      const frame = imageUri ? { cameraId: selected.id, imageUri, capturedAt: capturedAt ?? Date.now() } : null;
       setLoading(true);
       setError(null);
       try {
@@ -292,10 +306,11 @@ export default function App() {
         });
         if (gen !== runGen.current) return;
         applyResult(res);
+        setAnalysisFrame(frame && res.active_camera_id === frame.cameraId ? frame : null);
         applyVision(res);
         extendTrail(res);
         const label = visionTrackLabel(res.vision);
-        if (label) setDescription(label);
+        if (label && res.vision?.detected) setDescription(label);
         applyHandoff(res);
       } catch (e) {
         if (gen === runGen.current) {
@@ -321,7 +336,7 @@ export default function App() {
   );
 
   const detectionForCamera =
-    result && selected && (followingPick || result.active_camera_id === selected.id)
+    result && selected && result.active_camera_id === selected.id
       ? result
       : null;
 
@@ -417,6 +432,7 @@ export default function App() {
                 className="feed-stats-inline"
                 title={visionTrackLabel(detectionForCamera.vision) || undefined}
               >
+                <span>Last analysis · </span>
                 <b>{visionShortLabel(detectionForCamera.vision)}</b>
                 {detectionForCamera.vision?.appearance && (
                   <>
@@ -466,6 +482,8 @@ export default function App() {
               onPick={onPickObject}
               onFrameTrack={onFrameTrack}
               trackBusy={loading || tracking}
+              analysisFrame={analysisFrame?.cameraId === selected?.id ? analysisFrame : null}
+              onFrameAvailable={onFrameAvailable}
             />
           </div>
 

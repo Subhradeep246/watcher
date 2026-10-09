@@ -32,7 +32,7 @@ export async function watch(payload: WatchPayload): Promise<WatchResponse> {
   return r.json();
 }
 
-/** Fast tracking tick — dual-model vision, skips camera scan & model comparison. */
+/** Primary vision tick, with optional nearby search for an established track. */
 export async function track(payload: WatchPayload): Promise<WatchResponse> {
   const r = await fetch(`${BASE}/track`, {
     method: "POST",

@@ -124,9 +124,8 @@ async def watch(req: WatchRequest) -> WatchResponse:
 
 @app.post("/api/track", response_model=WatchResponse)
 async def track(req: WatchRequest) -> WatchResponse:
-    """Fast tracking tick — dual-model vision, Primary-only agents, no camera scan."""
+    """Primary vision tick; optional nearby search after an established track."""
     req.fast = True
-    req.skip_camera_scan = True
     return await watch(req)
 
 

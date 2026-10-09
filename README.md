@@ -47,6 +47,10 @@ The inference journal is local to each running backend instance and resets on re
 5. **Export evidence** downloads the latest brief and up to 60 session observations as JSON, including model outcomes, camera IDs, timestamped logs, and a SHA-256 fingerprint of each input image data URI. Exports do not contain camera pixels or API credentials. Camera selection starts a new timeline.
 6. **CoreWeave logs** shows the last 250 inference outcomes in this server process: host, model, agent, latency, tokens, HTTP status, retries, JSON parsing, and request ID. Filter to CoreWeave-backed W&B calls. The journal resets when the server restarts.
 
+Use **View analyzed frame** to compare a description and bounding box with the exact captured image sent to the model. **Return to live** resumes viewing current snapshots without carrying an old detection box onto them. Scan captures the displayed frame; the analyzed image stays in browser memory and is excluded from evidence exports. Failed or absent detections retain the requested target description. Nearby searches require an established observation, and `skip_camera_scan=true` disables them. Proposed cross-camera matches require verification.
+
+Model descriptions and localization can still be wrong, particularly in small or blurry traffic images. A successful request or high model confidence is not an accuracy guarantee. Click selection rejects boxes that miss the selected point; large position jumps and wrong target classes cannot silently change the object lock.
+
 ![Incident brief from a live scan](docs/screenshots/incident-brief.jpg)
 
 ![CoreWeave inference journal](docs/screenshots/coreweave-logs.jpg)

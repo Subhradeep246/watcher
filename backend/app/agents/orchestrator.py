@@ -53,8 +53,7 @@ from ..services.multi_camera_track import (
 
 # Confidence needed on another feed before we switch the active camera to it.
 _HANDOFF_COMMIT_CONF = 0.55
-# Large bbox jump + low confidence on a continue frame ⇒ probably a different
-# object (e.g. the model latched onto the other car/person in frame).
+# Large jumps cannot establish continuity from the previous object lock.
 _MAX_TRACK_DRIFT = 420.0
 
 
@@ -201,6 +200,16 @@ class Orchestrator:
         run = await self._call_primary(system, user, image_data_uri)
         target = infer_target_class(description)
         parsed = _safe(VisionResult, run.parsed if run.ok else None)
+        if parsed and parsed.detected and target != "other" and parsed.object_class != target:
+            parsed = None
+        if parsed and parsed.detected and parsed.bounding_box and click_lock and seed_bbox:
+            box = parsed.bounding_box
+            cx = seed_bbox.x + seed_bbox.width / 2
+            cy = seed_bbox.y + seed_bbox.height / 2
+            if not (box.x - 40 <= cx <= box.x + box.width + 40
+                    and box.y - 40 <= cy <= box.y + box.height + 40):
+                return VisionResult(object_label=description, detected=False, confidence=0,
+                                    context="Detection did not cover the clicked target"), AgentComparison(agent="vision", primary=run)
         raw = parsed.model_dump() if parsed else {}
         if parsed and parsed.detected and parsed.bounding_box:
             label = sanitize_label(parsed.object_label, description)
@@ -226,7 +235,7 @@ class Orchestrator:
                 detected=False,
                 confidence=0.0,
                 context=sanitize_label(parsed.context, "not visible"),
-                appearance=sanitize_appearance(raw.get("appearance")),
+                appearance=None,
             )
         else:
             merged = VisionResult(
@@ -262,7 +271,7 @@ class Orchestrator:
         comparisons = [vcmp]
 
         # Lock stability: on a continue frame, reject a detection that jumped
-        # far from the previous box unless it is high-confidence. This keeps the
+        # far from the previous box regardless of model confidence. This keeps the
         # lock on the SAME object when a person and a vehicle share the frame.
         if (
             continue_track
@@ -271,7 +280,7 @@ class Orchestrator:
             and seed is not None
         ):
             drift = bbox_center_drift(seed.model_dump(), vision.bounding_box.model_dump())
-            if drift > _MAX_TRACK_DRIFT and vision.confidence < 0.6:
+            if drift > _MAX_TRACK_DRIFT:
                 log.append("Ignored a look-alike in frame")
                 vision = VisionResult(
                     object_label=vision.object_label,
@@ -323,7 +332,7 @@ class Orchestrator:
         sightings: list = []
         active_cam = camera
         active_vision = vision
-        status = "tracking" if vision.detected else "searching"
+        status = "tracking" if vision.detected else "lost"
         searching_count = 0
 
         # Quota-aware fan-out: the hackathon cap is 100 RPM / 100K TPM, so we
@@ -344,6 +353,9 @@ class Orchestrator:
         )
         should_search = (
             not is_click
+            and not req.skip_camera_scan
+            and bool(vcmp.primary and vcmp.primary.ok)
+            and (continue_track or vision.detected)
             and bool(relocate_desc.strip())
             and (not vision.detected or leaving)
         )
@@ -440,8 +452,8 @@ class Orchestrator:
                 camera_id=active_cam.id,
                 camera_name=active_cam.name,
                 reason=(
-                    f"Same {active_vision.object_class} confirmed on "
-                    f"{active_cam.name} — following across cameras"
+                    f"Possible {active_vision.object_class} match on "
+                    f"{active_cam.name} — compare frames to verify identity"
                 ),
             )
 
