@@ -131,6 +131,19 @@ class IncidentBrief(BaseModel):
     evidence: list[str]
 
 
+class DescriptionReview(BaseModel):
+    status: Literal["not_configured", "skipped", "evaluated", "unavailable"]
+    requested_description: str = ""
+    reported_description: str = ""
+    contradiction_probability: Optional[float] = Field(default=None, ge=0, le=1)
+    coverage_probability: Optional[float] = Field(default=None, ge=0, le=1)
+    model: str = ""
+    latency_ms: int = 0
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    note: str = ""
+
+
 class WatchResponse(BaseModel):
     camera_id: str
     active_camera_id: str
@@ -153,6 +166,7 @@ class WatchResponse(BaseModel):
     # Human-readable control-room log lines.
     log: list[str] = Field(default_factory=list)
     brief: Optional[IncidentBrief] = None
+    description_review: Optional[DescriptionReview] = None
 
 
 class Camera(BaseModel):

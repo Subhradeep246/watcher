@@ -25,6 +25,19 @@ npm run dev -- --host 127.0.0.1
 
 Open [the local dashboard](http://127.0.0.1:5173). Credentials belong only in the ignored `.env`; they are never bundled into the frontend. See `.env.example` for every supported setting.
 
+## Vercel deployment
+
+Deploy from the repository root. `vercel.json` uses [Vercel Services (beta)](https://vercel.com/docs/services) to build the Vite dashboard and Python 3.12 FastAPI backend together. `/api/*` reaches the backend on the same domain; all other paths serve the dashboard.
+
+Set production environment variables on the Vercel project: `NVIDIA_API_KEY`, `WANDB_API_KEY`, `WANDB_PROJECT`, and the provider/model settings in `.env.example`. Store credentials as sensitive variables and keep them out of `VITE_*` variables. `.vercelignore` excludes local environment files and dependencies from uploads. Link the intended project explicitly before deploying:
+
+```sh
+vercel link --yes --scope <team> --project <project>
+vercel --scope <team> deploy --prod
+```
+
+The inference journal is local to each running backend instance and resets on restart. Vercel can serve requests from different instances, so the journal is a recent operational view; exported browser timelines and W&B Weave traces preserve session evidence independently. API health, a live camera snapshot, and a full scan should be checked after deployment.
+
 ## Operator workflow
 
 1. Select a camera from the map, search, or shortcut chips.
@@ -33,6 +46,10 @@ Open [the local dashboard](http://127.0.0.1:5173). Credentials belong only in th
 4. Read **Brief** for confidence, data provenance, incident context, and next steps. “Verify” means evidence is incomplete; “Observe” continues monitoring; “Review” requests operator assessment of a model risk estimate supported by real incident context.
 5. **Export evidence** downloads the latest brief and up to 60 session observations as JSON, including model outcomes, camera IDs, timestamped logs, and a SHA-256 fingerprint of each input image data URI. Exports do not contain camera pixels or API credentials. Camera selection starts a new timeline.
 6. **CoreWeave logs** shows the last 250 inference outcomes in this server process: host, model, agent, latency, tokens, HTTP status, retries, JSON parsing, and request ID. Filter to CoreWeave-backed W&B calls. The journal resets when the server restarts.
+
+Use **View analyzed frame** to compare a description and bounding box with the exact captured image sent to the model. **Return to live** resumes viewing current snapshots without carrying an old detection box onto them. Scan captures the displayed frame; the analyzed image stays in browser memory and is excluded from evidence exports. Failed or absent detections retain the requested target description. Nearby searches require an established observation, and `skip_camera_scan=true` disables them. Proposed cross-camera matches require verification.
+
+Model descriptions and localization can still be wrong, particularly in small or blurry traffic images. A successful request or high model confidence is not an accuracy guarantee. Click selection rejects boxes that miss the selected point; large position jumps and wrong target classes cannot silently change the object lock.
 
 ![Incident brief from a live scan](docs/screenshots/incident-brief.jpg)
 
@@ -49,6 +66,8 @@ flowchart LR
     NIM --> Agents[Vision / Tracker / Prediction / Risk]
     WB --> Agents
     Agents --> Brief[Evidence brief + timeline export]
+    Agents --> TS[Optional TypeSafe text consistency review]
+    TS --> Brief
     Agents --> Journal[Inference journal + W&B Weave]
     Brief --> UI
     Journal --> UI
@@ -64,12 +83,29 @@ The full Scan compares text agents and uses primary vision; the tracking loop us
 | W&B Inference | Text-agent comparison, on CoreWeave GPUs | `meta-llama/Llama-3.1-8B-Instruct` |
 | W&B Weave | Agent/model traces with images omitted from inputs | `WANDB_PROJECT=<entity>/<project>` |
 | CoreWeave endpoint | Optional self-hosted primary vision | `Qwen/Qwen2.5-VL-7B-Instruct` |
+| TypeSafe | Optional reported-description consistency review | `jev-latest` |
 
 `PRIMARY_PROVIDER=auto` chooses NVIDIA if configured, then a dedicated CoreWeave endpoint. `SECONDARY_PROVIDER=auto` uses W&B; set `none` to disable comparison. `NVIDIA_DISABLE_THINKING=true` shortens the default reasoning model's responses. After two HTTP 503 overload responses, the last attempt uses `NVIDIA_FALLBACK_MODEL` (default: `meta/llama-3.2-11b-vision-instruct`); set it empty to disable fallback. Logs and model outcomes record the actual model used.
+
+The default standby uses NVIDIA's JSON-schema response format. Agent responses must contain their expected fields and pass schema validation before they are recorded as successful. An HTTP 200 with prose, a nested bounding-box fragment, or incomplete agent JSON remains an inference failure and produces an unconfirmed brief.
 
 The default W&B model is text-only. `WANDB_VISION_ENABLED=false` prevents sending it unsupported image requests; skipped calls are labelled disabled in the journal. Enable image input only with a compatible model that your account can access. Check `/v1/models` at the provider to see currently available models.
 
 No dedicated CoreWeave endpoint is required to use W&B Inference. The **CoreWeave logs** panel reports application-level inference outcomes; it does not claim to expose Kubernetes pod logs, GPU utilization, GPU temperature, or infrastructure billing. Connect your own CoreWeave deployment for infrastructure telemetry. [`deploy/coreweave/vision-gpu.yaml`](deploy/coreweave/vision-gpu.yaml) and [`watcher.yaml`](deploy/coreweave/watcher.yaml) are optional deployment templates requiring a registry image and cluster credentials.
+
+## TypeSafe description review
+
+The [TypeSafe skill](.agents/skills/typesafe-ai/SKILL.md) is installed for Codex in this repository with a pinned source hash in `skills-lock.json`. `AGENTS.md` instructs future project work to use it. Installation used one method:
+
+```sh
+npx skills add typesafe-ai/skills --skill typesafe-ai --agent codex --yes
+```
+
+Set the separate server-side `TYPESAFE_API_KEY` in `.env` to enable the review; `TYPESAFE_MODEL` defaults to `jev-latest`. NVIDIA and W&B credentials do not enable TypeSafe. The integration follows the [live HTTP API](https://docs.typesafe.ai/api), [Noul guidance](https://docs.typesafe.ai/primitives/noul), and [citation-checking pattern](https://docs.typesafe.ai/cookbooks/citation_check).
+
+After a successful full **Scan** detection, one request asks two independent questions about the requested target and the vision agent's reported visible appearance: does a feature explicitly conflict, and are all requested visible distinguishing features reported? Both raw probabilities appear in **Brief**, the evidence export, and the API's `description_review` field. Low contradiction alone does not establish a match; generic or missing detail can still have low coverage. A value near 50% reflects uncertainty between yes and no. The check receives text, never camera pixels, identity hints, or scene-motion claims. It cannot detect a description that is internally consistent but visually wrong.
+
+The review is advisory: probabilities do not change target locks, camera handoffs, or risk priority. Thresholds need evaluation on labeled camera data before any automatic decisions. Fast tracking skips this request to preserve its latency budget. Missing keys are labelled `not_configured`; absent or failed vision results are `skipped`; service or contract failures are `unavailable`. Requests have an eight-second overall deadline, with at most one retry for HTTP 429/529. Metadata-only journal entries report actual model, latency, tokens, status and retry count. `/api/health` reports configuration without testing the credential. Live TypeSafe accuracy has not been evaluated without a TypeSafe key.
 
 ## Data provenance
 

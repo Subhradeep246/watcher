@@ -1,10 +1,10 @@
-# Local verification — October 9, 2026
+# Local and Vercel verification — October 9, 2026
 
 The frontend runs at http://127.0.0.1:5173 and the backend at http://127.0.0.1:8000. The supplied keys are stored in an ignored local `.env` with owner-only file permissions. No credentials are included in this report.
 
 ## Checks performed
 
-- **13 behavior tests passed** with `PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v`.
+- **23 behavior tests passed** with `PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests -v`, covering malformed output, risk schema validation, standby generation, clicked-target containment, class mismatch, position jumps, camera-scan opt-out, and unverified handoffs.
 - **Production frontend build passed** with `npm run build --prefix frontend`.
 - **982 online NYC cameras loaded** through the public DOT catalog; live nearby and main-feed snapshots rendered in the browser.
 - **NVIDIA multimodal inference returned HTTP 200** with `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`. The alternative `meta/llama-3.2-11b-vision-instruct` also accepted image input in a live probe.
@@ -22,6 +22,47 @@ The final full Scan at approximately **3:33 PM Eastern** also succeeded with **8
 
 Screenshots of the successful final run: [`incident-brief.jpg`](screenshots/incident-brief.jpg) and [`coreweave-logs.jpg`](screenshots/coreweave-logs.jpg).
 
+## Vercel production verification
+
+Production code commit: `68aa6a0`. Deployment: `dpl_C9vWBRCSWGGXhe65CWGzTUFBuLqy`. Stable URL: https://thewatcher-7dracoders-projects.vercel.app. Vercel Authentication currently protects the deployment; tests used authenticated `vercel curl`, without disabling protection. Credentials were configured as sensitive production variables, and local environment files were excluded from uploads.
+
+- The React build and Python 3.12 FastAPI service reached **Ready**. The Python function bundle was 64.37 MB.
+- Dashboard HTML, backend health, the 982-camera catalog, and a real camera JPEG returned HTTP 200. Weave tracing was enabled.
+- The first hosted scan exposed an output-format failure: the standby returned prose containing only a bounding-box JSON fragment. A strict JSON-schema request resolved this in a live provider probe. The updated provider validates each agent's required fields and schema, and records malformed output as a failure even when HTTP status is 200.
+- The updated full scan on **Central Park West @ 86 St** at approximately **5:14 PM Eastern** detected a vehicle and returned `tracking` with a source-labelled brief. **7/7 active inference calls succeeded with validated output**, using 2,221 reported tokens. Three calls ran on W&B/CoreWeave; W&B vision remained explicitly disabled. The NVIDIA tracker call used the strict-schema standby after two overload responses. Observed call latencies ranged from 352 ms to 8,496 ms.
+- The hosted journal returned 7 calls, 7 successes, and the three CoreWeave-backed calls. Its retention remains per backend instance.
+- A subsequent fast tracking request returned HTTP 200, a validated detection, `tracking`, and a `nyc_dot` brief. The single active vision call took 3,058 ms in this observation.
+- The hosted route endpoint returned HTTP 200 with 44 route coordinates.
+- Incident context remained sample data; the brief kept `risk_supported=false` and did not present model confidence as proof of a hazard or identity.
+
+Anonymous browser access reaches the Vercel login page. A temporary login-free share URL was not created because automatic approval review rejected expanding access without explicit user authorization. This does not affect authenticated deployment operation.
+
+## Local description accuracy follow-up
+
+Checking actual frames exposed stale detection boxes over newer live images, unwanted nearby searches after a failed initial detection, and unsupported appearance details. The local fixes capture the displayed image for Scan, offer **View analyzed frame**, show boxes only on that exact image, retain the requested description after unsuccessful detections, and mark proposed handoffs as unverified. Failed initial vision cannot start a handoff; `skip_camera_scan=true` is respected on the fast path. Wrong target classes, boxes away from the clicked point, and large lock jumps are rejected.
+
+The final shorter prompts were tested against one saved 7 Ave @ 34 St snapshot. NVIDIA correctly described the visible white box truck as “white box truck with white cab and white cargo box,” with a normalized box at `(0, 585, 325, 415)` matching the bottom-left foreground. An absent purple double-decker bus returned `detected=false`, zero confidence, no box, and no appearance or identity hint. Earlier responses had incorrect placement or speculative details; these results are observations on one frame, not a general accuracy benchmark.
+
+The browser's absent-target Scan kept the entered description, displayed Verify, and provided the exact analyzed frame. Its exported SHA-256 matched the displayed analyzed image data URI, and the export contained no image pixels. Returning to live removed historical boxes. No browser console errors were observed, and the frontend production build passed. Screenshot: [`analyzed-frame.png`](screenshots/analyzed-frame.png).
+
+A final full local Scan on the saved truck image returned HTTP 200 with **7/7 active inference calls successful** across vision, tracker, prediction, and risk. Vision localized the foreground truck at `(0, 580, 320, 420)`, and the tracker used the correct 7 Ave / 34 St camera metadata. The three W&B text comparisons succeeded. Motion and path outputs remain estimates from camera geometry and a single snapshot; incident risk remained unverified because its context was sample data.
+
+These follow-up changes run locally; the Vercel checks above describe the earlier deployed commit.
+
 ## Practical limits
 
 Provider load and changing traffic can affect detections and latency. A cross-camera handoff is a visual matching hypothesis rather than verified identity. The supplied setup has no dedicated CoreWeave cluster endpoint or incident-data keys: infrastructure GPU metrics and real-world hazard assessment are therefore unavailable. The journal contains real application-level W&B/CoreWeave inference outcomes, and sample context is labelled. Docker and the optional Kubernetes manifests were not deployed.
+
+## TypeSafe skill and description review follow-up
+
+Installed `typesafe-ai` for Codex using `npx skills add typesafe-ai/skills --skill typesafe-ai --agent codex --yes`. The project includes the installed MIT-licensed skill, source hash lock, and `AGENTS.md` guidance. The live documentation index, HTTP API, Noul guidance, and citation-checking cookbook informed the implementation.
+
+Optional full-Scan description review sends one text-only TypeSafe request containing two independent Noul questions: explicit feature contradiction and coverage of requested distinguishing visible features. The review returns validated probabilities, actual model, latency and usage. It remains advisory, with no automatic tracking, handoff or risk decisions. Fast tracking does not add this request. The overall deadline is eight seconds, with at most one overload/rate-limit retry.
+
+- **36 behavior tests passed**, including 13 new tests for configuration, batching, state boundaries, conflicting/matching/uncertain mocked judgments, missing evidence, malformed probabilities, authentication failures, timeouts, retries, input budgets, advisory brief behavior, and the full API response flow.
+- **Frontend production build passed** after the final changes; `git diff --check` passed.
+- **Local health reports TypeSafe disabled** while NVIDIA, W&B and Weave remain configured. No TypeSafe API key was provided; no live TypeSafe judgment or accuracy evaluation was performed. Mocked answer fixtures establish contract and policy behavior, not semantic model accuracy.
+- **A real browser Scan exercised the failure path** at about 5:53 PM Eastern. NVIDIA retried twice and used the standby; the final HTTP 200 response failed vision-schema validation. The UI correctly displayed Lost / Verify, with TypeSafe explicitly **not configured** and no invented review probabilities. This run does not establish a successful detection.
+- **Browser evidence export included `description_review.status=not_configured`**, null probabilities, and no image pixels. No browser console errors were observed. Screenshot: [`typesafe-review.png`](screenshots/typesafe-review.png).
+
+These changes run locally. The production deployment described above still predates both local follow-up changes.

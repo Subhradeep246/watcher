@@ -4,6 +4,12 @@ import type { BoundingBox, Camera, WatchResponse } from "../types";
 const SNAPSHOT_INTERVAL_MS = 2000;
 const PICK_SIZE = 120;
 
+export interface AnalyzedFrame {
+  cameraId: string;
+  imageUri: string;
+  capturedAt: number;
+}
+
 export function captureImageDataUri(img: HTMLImageElement): string | null {
   try {
     const w = img.naturalWidth || img.width;
@@ -55,15 +61,19 @@ export default function SnapshotPanel({
   onFrameTrack,
   trackBusy,
   followingPick,
+  analysisFrame,
+  onFrameAvailable,
 }: {
   camera: Camera | null;
   result: WatchResponse | null;
   pickSeed: BoundingBox | null;
   followingPick: boolean;
   trackStatus: "idle" | "locking" | "tracking" | "searching" | "lost";
-  onPick: (box: BoundingBox, imageUri: string | null) => void;
+  onPick: (box: BoundingBox, imageUri: string | null, capturedAt?: number) => void;
   onFrameTrack?: (imageUri: string, frameTick: number) => void;
   trackBusy?: boolean;
+  analysisFrame: AnalyzedFrame | null;
+  onFrameAvailable: (imageUri: string) => void;
 }) {
   const [tick, setTick] = useState(0);
   const [displaySrc, setDisplaySrc] = useState<string | null>(null);
@@ -75,6 +85,9 @@ export default function SnapshotPanel({
   const imgRef = useRef<HTMLImageElement | null>(null);
   const nextAtRef = useRef(Date.now() + SNAPSHOT_INTERVAL_MS);
   const lastAutoTrackTick = useRef(-1);
+  const [showAnalysis, setShowAnalysis] = useState(false);
+  const capturedImage = useRef<{ src: string; uri: string } | null>(null);
+  const showingAnalysis = showAnalysis && Boolean(analysisFrame && result);
 
   const isLive = Boolean(camera && !camera.sample_image);
   const nextSrc = !camera
@@ -104,6 +117,8 @@ export default function SnapshotPanel({
     lastAutoTrackTick.current = -1;
     setFrameSize(null);
     setDisplaySrc(null);
+    setShowAnalysis(false);
+    capturedImage.current = null;
   }, [camera?.id]);
 
   useEffect(() => {
@@ -156,7 +171,8 @@ export default function SnapshotPanel({
     if (!imgRef.current.complete || !imgRef.current.naturalWidth) return;
     if (isLive && !imgRef.current.src.includes(`/api/cameras/${camera?.id}/snapshot`)) return;
     if (tick === lastAutoTrackTick.current) return;
-    const uri = captureImageDataUri(imgRef.current);
+    const uri = capturedImage.current?.src === imgRef.current.src
+      ? capturedImage.current.uri : captureImageDataUri(imgRef.current);
     if (!uri) return;
     lastAutoTrackTick.current = tick;
     onFrameTrack(uri, tick);
@@ -165,8 +181,16 @@ export default function SnapshotPanel({
   const onImgLoad = useCallback(() => {
     setRefreshing(false);
     fitFrame();
+    const img = imgRef.current;
+    if (img) {
+      const uri = captureImageDataUri(img);
+      if (uri) {
+        capturedImage.current = { src: img.src, uri };
+        onFrameAvailable(uri);
+      }
+    }
     tryAutoTrack();
-  }, [fitFrame, tryAutoTrack]);
+  }, [fitFrame, tryAutoTrack, onFrameAvailable]);
 
   useEffect(() => {
     if (displaySrc && followingPick && onFrameTrack) tryAutoTrack();
@@ -174,11 +198,12 @@ export default function SnapshotPanel({
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLImageElement>) => {
-      const img = imgRef.current;
+      const img = e.currentTarget;
       if (!displaySrc || !img || trackBusy) return;
-      onPick(clickToSeed(e), captureImageDataUri(img));
+      onPick(clickToSeed(e), showingAnalysis && analysisFrame ? analysisFrame.imageUri : captureImageDataUri(img),
+             showingAnalysis ? analysisFrame?.capturedAt : undefined);
     },
-    [displaySrc, onPick, trackBusy]
+    [displaySrc, onPick, trackBusy, showingAnalysis, analysisFrame]
   );
 
   if (!camera) {
@@ -190,7 +215,7 @@ export default function SnapshotPanel({
   }
 
   const detBox = result?.vision?.bounding_box;
-  const showDet = result?.vision?.detected !== false && detBox;
+  const showDet = showingAnalysis && result?.vision?.detected !== false && detBox;
   const detPct = showDet &&
     detBox && {
       left: clampPct(detBox.x),
@@ -224,24 +249,37 @@ export default function SnapshotPanel({
             onLoad={onImgLoad}
             onClick={handleClick}
             title="Click a vehicle or person to track"
+            style={showingAnalysis ? { visibility: "hidden" } : undefined}
           />
         ) : (
           <div className="snapshot-empty">Loading feed…</div>
+        )}
+        {showingAnalysis && analysisFrame && (
+          <img src={analysisFrame.imageUri} alt={`Analyzed frame · ${camera.name}`}
+            onClick={handleClick} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
         )}
 
         <div className="snapshot-overlay-top">
           <span className={`track-pill track-pill-${trackStatus}`}>
             {trackStatus === "idle" && "Click object to track"}
             {trackStatus === "locking" && "Locking target…"}
-            {trackStatus === "tracking" && "Tracking"}
+            {trackStatus === "tracking" && (followingPick ? "Tracking" : "Analysis saved")}
             {trackStatus === "searching" && "Searching nearby feeds…"}
             {trackStatus === "lost" && "Lost — click again"}
           </span>
-          {isLive && <span className="pill pill-live">~2s</span>}
+          {isLive && !showingAnalysis && <span className="pill pill-live">LIVE · ~2s</span>}
+          {analysisFrame && result && (
+            <button className="pill" type="button" style={{pointerEvents: "auto", cursor: "pointer"}} onClick={() => setShowAnalysis(v => !v)}>
+              {showingAnalysis ? "Return to live" : "View analyzed frame"}
+            </button>
+          )}
+          {showingAnalysis && analysisFrame && (
+            <span className="pill">Analyzed · {new Date(analysisFrame.capturedAt).toLocaleTimeString()}</span>
+          )}
           {trackBusy && <span className="pill pill-primary">INFERENCE</span>}
         </div>
 
-        {result?.vision && (
+        {showingAnalysis && result?.vision && (
           <span
             className={`det-badge${
               result.vision.detected === false ? " det-miss" : ""
@@ -256,7 +294,7 @@ export default function SnapshotPanel({
         )}
         {isLive && refreshing && <span className="refresh-badge" />}
 
-        {pickPct && (
+        {pickPct && followingPick && trackStatus === "locking" && (
           <div
             className="pick-box pick-active"
             style={{

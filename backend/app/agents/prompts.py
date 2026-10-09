@@ -9,6 +9,15 @@ JSON_RULE = (
     "no code fences. Use double quotes for all keys and string values."
 )
 
+VISIBLE_ONLY = (
+    " Describe only details directly visible in this frame. Do not infer make, "
+    "brand, plate characters, cargo, intent, damage, or absence of features "
+    "from blurry or hidden areas. Use null for unreadable identity hints. "
+    "A single frame cannot prove movement or identity across cameras. "
+    "If the requested color/type/details do not match, return detected=false; "
+    "do not substitute a similar object."
+)
+
 _CLASS_RULES = {
     "person": (
         "TARGET TYPE: PERSON (pedestrian, cyclist, or human). "
@@ -32,23 +41,18 @@ def vision_track_system() -> str:
         "You are a forensic traffic-camera analyst. Your job is to lock onto ONE "
         "clicked object and describe every visible detail needed to recognize it "
         "on other cameras minutes later. Return ONLY one JSON object. "
-        + JSON_RULE
+        + JSON_RULE + VISIBLE_ONLY
     )
 
 
 _DETAIL_RULES = (
-    "\nDETAIL RULES (critical for tracking):\n"
+    "\nVISIBLE DESCRIPTION RULES:\n"
     "- object_label: SHORT category only (e.g. pedestrian, yellow taxi, white van)\n"
-    "- appearance: LONG rich description — list EVERY distinguishing visual detail:\n"
-    "  * PERSON: clothing colors, jacket/coat, backpack/bag color & type, hat, "
-    "hair, pants, shoes, what they carry, bike color if cyclist\n"
-    "  * VEHICLE: color, make/body style, roof racks, stickers/decals/bumper "
-    "stickers, damage, taxi markings, window tint, plate if readable, "
-    "unique marks on rear/side visible\n"
-    "  * Be specific (\"black Jansport backpack\" not \"backpack\")\n"
-    "- identity_hint: license plate characters OR the ONE most unique marker "
-    "(e.g. \"red circular bumper sticker\", \"NY plate ABC1234\")\n"
-    "- context: where in frame + movement direction if visible\n"
+    "- appearance: one short sentence describing visible color, body/clothing shape "
+    "and any clearly visible distinctive mark. Omit unknown details and negative claims.\n"
+    "- identity_hint: a clearly readable plate or distinct visible marker; otherwise null\n"
+    "- context: location in the image. Motion is unknown from a single snapshot.\n"
+    "- detected=false: confidence=0, bounding_box=null, appearance=null, identity_hint=null\n"
 )
 
 
@@ -66,10 +70,8 @@ def vision_track_user(
         cy = seed_bbox.y + seed_bbox.height // 2
         hint = (
             f"\nUSER CLICKED at ({cx},{cy}). Box ONLY the object under the click.\n"
-            "Study it carefully. Fill appearance with ALL visible distinguishing "
-            "details — colors, clothing, bags, stickers, decals, dents, logos, "
-            "plate digits. Another camera must match this exact object, not a "
-            "similar one."
+            "Describe only clearly visible colors, shape and distinguishing marks. "
+            "If the click does not identify a visible object, set detected=false."
         )
     elif seed_bbox and continue_track:
         hint = (
@@ -100,7 +102,7 @@ def vision_track_user(
         '"object_label":str,"appearance":str,"confidence":number,'
         '"bounding_box":{"x":int,"y":int,"width":int,"height":int},'
         '"identity_hint":str|null,"context":str}\n'
-        "bbox coords 0-1000. detected=false if not visible."
+        "bbox coords 0-1000. detected=false if not visible.\n" + JSON_RULE + VISIBLE_ONLY
     )
 
 
@@ -110,7 +112,7 @@ def vision_system(target_class: ObjectClass) -> str:
         "Your job is precise object localization in NYC DOT camera snapshots. "
         + _CLASS_RULES[target_class]
         + " If the target is NOT visible, set detected=false and confidence=0. "
-        + JSON_RULE
+        + JSON_RULE + VISIBLE_ONLY
     )
 
 

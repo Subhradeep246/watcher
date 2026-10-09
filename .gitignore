@@ -9,6 +9,7 @@ venv/
 node_modules/
 dist/
 .vite/
+.vercel/
 
 # Built SPA copied into the backend for single-service serving (Docker does this)
 backend/static/
@@ -27,3 +28,5 @@ Thumbs.db
 
 # Logs
 *.log
+.vercel
+.env*

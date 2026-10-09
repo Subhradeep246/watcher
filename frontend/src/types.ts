@@ -79,6 +79,20 @@ export interface WatchResponse {
   comparisons: AgentComparison[];
   log: string[];
   brief: IncidentBriefData | null;
+  description_review?: DescriptionReview | null;
+}
+
+export interface DescriptionReview {
+  status: "not_configured" | "skipped" | "evaluated" | "unavailable";
+  requested_description: string;
+  reported_description: string;
+  contradiction_probability: number | null;
+  coverage_probability: number | null;
+  model: string;
+  latency_ms: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  note: string;
 }
 
 export interface CameraSighting {

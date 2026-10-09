@@ -12,6 +12,7 @@ def build_brief(result: WatchResponse, camera: Camera, *, source: str,
     vision = result.vision
     detected = bool(vision and vision.detected)
     live_evidence = source in ("nyc_dot", "client_frame") and bool(image)
+    handoff = result.handoff if result.active_camera_id != camera.id else None
     risk_cmp = next((c for c in result.comparisons if c.agent == "risk"), None)
     risk_run = risk_cmp.primary if risk_cmp else None
     context_live = bool(incidents) and all("sample" not in i.lower() for i in incidents)
@@ -24,11 +25,12 @@ def build_brief(result: WatchResponse, camera: Camera, *, source: str,
             pass
     worst = max(result.risk.path_risks, key=lambda p: p.risk_score, default=None) if result.risk else None
     priority = "review" if detected and live_evidence and risk_supported and worst and worst.risk_score >= 0.7 else "observe"
-    if not live_evidence or not detected:
+    if not live_evidence or not detected or handoff:
         priority = "verify"
     actions = []
     if priority == "verify":
-        actions.append("Verify an available camera frame and select the target before acting.")
+        actions.append("Compare the original and proposed camera frames to verify the target." if handoff
+                       else "Verify an available camera frame and select the target before acting.")
     elif priority == "review":
         actions.append(f"Review the {worst.direction} path with an operator; model risk is an estimate.")
     else:
@@ -40,6 +42,14 @@ def build_brief(result: WatchResponse, camera: Camera, *, source: str,
     elif not risk_supported:
         actions.append("Run a full Scan to assess risk against the available incident context.")
     warnings = []
+    description_review = result.description_review
+    if description_review and description_review.status == "evaluated":
+        actions.append("Compare the requested and reported descriptions with the analyzed frame; TypeSafe probabilities are advisory.")
+        warnings.append("TypeSafe checks vision-agent text, not camera pixels or cross-camera identity.")
+    elif description_review and description_review.status == "unavailable":
+        warnings.append(description_review.note)
+    if handoff:
+        warnings.append("Cross-camera match is unverified. The frame fingerprint belongs to the original camera.")
     if not live_evidence:
         warnings.append("Sample or unavailable frame: this is not live incident evidence.")
     if not context_live:
@@ -53,11 +63,12 @@ def build_brief(result: WatchResponse, camera: Camera, *, source: str,
         warnings.append("A provider or comparison capability is disabled; inspect CoreWeave logs for details.")
     return IncidentBrief(
         id=trace_id, created_at=datetime.now(timezone.utc).isoformat(),
-        title=f"{vision.object_label if detected else 'Unconfirmed target'} · {camera.name}",
+        title=f"{vision.object_label if detected else 'Unconfirmed target'} · {handoff.camera_name if handoff else camera.name}",
         priority=priority, frame_source=source,
         frame_sha256=hashlib.sha256(image.encode()).hexdigest() if image else None,
         camera_name=camera.name, confidence=vision.confidence if detected else 0,
-        summary=f"{'Detected' if detected else 'Not confirmed'} at {camera.name}. Tracking state: {result.status}.",
+        summary=(f"Possible match at {handoff.camera_name}; identity requires verification. Original frame: {camera.name}."
+                 if handoff else f"{'Detected' if detected else 'Not confirmed'} at {camera.name}. Tracking state: {result.status}."),
         actions=actions, limitations=warnings, incident_context=incidents,
         risk_supported=risk_supported, risk_peak=worst.risk_score if risk_supported and worst else None,
         evidence=[f"{r.host or r.provider}: {r.model} · {'success' if r.ok else 'failed'} · {r.latency_ms} ms" for r in runs],

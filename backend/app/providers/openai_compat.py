@@ -14,10 +14,47 @@ from typing import Literal, Optional
 import httpx
 
 from ..config import get_settings
-from ..schemas import ModelRun
+from ..schemas import ModelRun, PredictionResult, RiskResult, TrackerResult, VisionResult
 from ..tracing import traced
 from ..telemetry import observed
 from .base import LLMProvider, extract_json
+
+
+_OUTPUT_MODELS = {
+    "vision": (VisionResult, {"detected", "object_class", "object_label", "confidence", "bounding_box"}),
+    "tracker": (TrackerResult, {"camera_id", "lat", "lng", "intersection"}),
+    "prediction": (PredictionResult, {"paths"}),
+    "risk": (RiskResult, {"path_risks"}),
+}
+
+
+def _validated_json(text: str, agent: str) -> Optional[dict]:
+    parsed = extract_json(text)
+    if not isinstance(parsed, dict):
+        return None
+    spec = _OUTPUT_MODELS.get(agent)
+    if spec:
+        model, required = spec
+        if not required.issubset(parsed):
+            return None
+        try:
+            model.model_validate(parsed)
+            if agent == "vision" and parsed["detected"] and not parsed["bounding_box"]:
+                return None
+        except ValueError:
+            return None
+    return parsed
+
+
+def _constrain_standby(payload: dict, agent: str) -> None:
+    # This hosted standby model supports NIM's JSON-schema generation. JSON
+    # object mode alone can still produce prose on the catalog endpoint.
+    spec = _OUTPUT_MODELS.get(agent)
+    if payload["model"] == "meta/llama-3.2-11b-vision-instruct" and spec:
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": agent, "schema": spec[0].model_json_schema()},
+        }
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -94,6 +131,7 @@ class OpenAICompatProvider(LLMProvider):
         }
         if reasoning_effort != "default":
             payload["reasoning_effort"] = reasoning_effort
+        _constrain_standby(payload, agent)
 
         headers = {"Authorization": f"Bearer {self.api_key}", **self.extra_headers}
         start = time.perf_counter()
@@ -111,6 +149,7 @@ class OpenAICompatProvider(LLMProvider):
                         if resp.status_code == 503 and attempt == 1 and self.fallback_model:
                             payload["model"] = self.fallback_model
                             payload.pop("chat_template_kwargs", None)
+                            _constrain_standby(payload, agent)
                         await asyncio.sleep(1.5 * (attempt + 1))
                         continue
                     break
@@ -119,10 +158,11 @@ class OpenAICompatProvider(LLMProvider):
             data = resp.json()
             text = data["choices"][0]["message"]["content"] or ""
             usage = data.get("usage") or {}
+            parsed = _validated_json(text, agent)
             return ModelRun(
                 provider=self.name,
                 model=payload["model"],
-                ok=True,
+                ok=parsed is not None,
                 status_code=resp.status_code,
                 retries=attempt,
                 latency_ms=latency,
@@ -130,7 +170,8 @@ class OpenAICompatProvider(LLMProvider):
                 completion_tokens=usage.get("completion_tokens"),
                 total_tokens=usage.get("total_tokens"),
                 raw_text=text,
-                parsed=extract_json(text),
+                parsed=parsed,
+                error=None if parsed is not None else f"{self.label}: invalid {agent} JSON response",
             )
         except Exception as exc:  # noqa: BLE001 — surface any failure to the UI
             latency = int((time.perf_counter() - start) * 1000)

@@ -3,6 +3,7 @@ import type { WatchResponse } from "../types";
 export default function IncidentBrief({ history }: { history: WatchResponse[] }) {
   const latest = history[history.length - 1];
   const brief = latest?.brief;
+  const review = latest?.description_review;
   const exportBrief = () => {
     if (!brief) return;
     const blob = new Blob([JSON.stringify({ product: "TheWatcher", exported_at: new Date().toISOString(), brief, timeline: history }, null, 2)], { type: "application/json" });
@@ -20,6 +21,18 @@ export default function IncidentBrief({ history }: { history: WatchResponse[] })
       <div><b>{brief.risk_peak == null ? "Unverified" : `${Math.round(brief.risk_peak * 100)}%`}</b><span>estimated risk</span></div>
     </div>
     <div className="source-label">Frame: {brief.frame_source.replace(/_/g, " ")} · {new Date(brief.created_at).toLocaleTimeString()}</div>
+    {review && <section aria-label="TypeSafe description review">
+      <h4>TypeSafe · Description review</h4>
+      {review.status === "evaluated" && <>
+        <p className="event-meta"><b>Requested:</b> {review.requested_description}<br/><b>Reported:</b> {review.reported_description}</p>
+        <div className="brief-metrics">
+          <div><b>{review.contradiction_probability == null ? "—" : `${Math.round(review.contradiction_probability * 100)}%`}</b><span>probability of conflicting features</span></div>
+          <div><b>{review.coverage_probability == null ? "—" : `${Math.round(review.coverage_probability * 100)}%`}</b><span>probability all requested features are reported</span></div>
+        </div>
+        <p className="event-meta">{review.model} · {review.latency_ms} ms · {review.input_tokens == null && review.output_tokens == null ? "—" : ((review.input_tokens ?? 0) + (review.output_tokens ?? 0))} tokens</p>
+      </>}
+      <p className="event-meta" role="status">{review.note}</p>
+    </section>}
     <h4>Next steps</h4><ol className="brief-actions">{brief.actions.map(a => <li key={a}>{a}</li>)}</ol>
     {brief.limitations.length > 0 && <div className="brief-limitations"><b>Evidence limits</b>{brief.limitations.map(w => <p key={w}>{w}</p>)}</div>}
     <h4>Incident context</h4>{brief.incident_context.map(c => <p className="event-meta" key={c}>{c}</p>)}
