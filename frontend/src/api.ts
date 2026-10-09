@@ -1,4 +1,4 @@
-import type { BoundingBox, Camera, Health, WatchResponse } from "./types";
+import type { BoundingBox, Camera, Health, Telemetry, WatchResponse } from "./types";
 
 const BASE = "/api";
 
@@ -58,4 +58,10 @@ export async function getRoadRoute(
   if (!r.ok) return [from, to];
   const data = (await r.json()) as { coordinates: [number, number][] };
   return data.coordinates?.length ? data.coordinates : [from, to];
+}
+
+export async function getTelemetry(): Promise<Telemetry> {
+  const r = await fetch(`${BASE}/telemetry`);
+  if (!r.ok) throw new Error(`telemetry failed: ${r.status}`);
+  return r.json();
 }

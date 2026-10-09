@@ -1,9 +1,9 @@
-# Self-hosted Gemma vision model on a CoreWeave GPU node (OpenAI-compatible).
+# Self-hosted Qwen vision vision model on a CoreWeave GPU node (OpenAI-compatible).
 # TheWatcher points at it with:
 #   PRIMARY_PROVIDER=coreweave
-#   COREWEAVE_BASE_URL=http://gemma-gpu.thewatcher.svc.cluster.local:8000/v1
+#   COREWEAVE_BASE_URL=http://vision-gpu.thewatcher.svc.cluster.local:8000/v1
 #
-# Create the HF token secret first (Gemma weights are gated):
+# Create the HF token secret first if your registry requires authentication:
 #   kubectl -n thewatcher create secret generic hf-token --from-literal=HF_TOKEN=hf_xxx
 #
 # Prefer an NVIDIA NIM container? Swap the image for the model's NIM image from
@@ -12,22 +12,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gemma-gpu
+  name: vision-gpu
   namespace: thewatcher
 spec:
   replicas: 1
   selector:
-    matchLabels: { app: gemma-gpu }
+    matchLabels: { app: vision-gpu }
   template:
     metadata:
-      labels: { app: gemma-gpu }
+      labels: { app: vision-gpu }
     spec:
       containers:
         - name: vllm
           image: vllm/vllm-openai:v0.10.1
           args:
-            - --model=google/gemma-4-31B-it
-            - --served-model-name=google/gemma-4-31B-it
+            - --model=Qwen/Qwen2.5-VL-7B-Instruct
+            - --served-model-name=Qwen/Qwen2.5-VL-7B-Instruct
             - --max-model-len=16384
             - --limit-mm-per-prompt={"image":1}
           env:
@@ -54,10 +54,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: gemma-gpu
+  name: vision-gpu
   namespace: thewatcher
 spec:
-  selector: { app: gemma-gpu }
+  selector: { app: vision-gpu }
   ports:
     - port: 8000
       targetPort: 8000

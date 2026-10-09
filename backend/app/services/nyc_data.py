@@ -37,7 +37,7 @@ def _load_sample_cameras() -> list[Camera]:
 
 def _placeholder_snapshot(label: str) -> str:
     """Render a simple raster (PNG) street scene so the vision model gets a
-    valid image even with no live feed. Vision APIs reject SVG, hence PNG.
+    valid image for an explicitly labelled sample camera. Providers accept PNG.
     """
     import base64
     import io
@@ -139,7 +139,7 @@ class NYCDataService:
                 return f"data:{ct};base64,{b64}"
             except Exception:  # noqa: BLE001
                 pass
-        return camera.sample_image or _placeholder_snapshot(camera.name)
+        return camera.sample_image
 
     async def _fetch_live_cameras(self) -> list[Camera]:
         url = "https://511ny.org/api/getcameras"

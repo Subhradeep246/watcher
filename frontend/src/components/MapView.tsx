@@ -264,14 +264,14 @@ export default function MapView({
     <MapContainer center={center} zoom={15} className="map">
       <TileLayer
         attribution={
-          GEOAPIFY_KEY ? "&copy; OpenStreetMap" : "&copy; OpenStreetMap &copy; CARTO"
+          CARTO_KEY ? "&copy; OpenStreetMap &copy; CARTO" : "&copy; OpenStreetMap"
         }
         url={
           GEOAPIFY_KEY
             ? `https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=${GEOAPIFY_KEY}`
-            : `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png${
-                CARTO_KEY ? `?key=${CARTO_KEY}` : ""
-              }`
+            : CARTO_KEY
+              ? `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`
+              : "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
         }
       />
       <Recenter lat={focus[0]} lng={focus[1]} zoom={zoom} />
@@ -319,7 +319,7 @@ export default function MapView({
 
       {mapPaths.map((p) => {
         const pct = Math.round(p.probability * 100);
-        const color = riskColor(p.risk);
+        const color = result?.brief?.risk_supported ? riskColor(p.risk) : "#ff9f0a";
         const geometry = roadGeometries[p.direction] ?? [p.start, p.end];
         const labelPos = routeMidpoint(geometry);
         const road = roadShortName(p.roadName);

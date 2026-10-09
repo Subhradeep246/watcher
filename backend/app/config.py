@@ -18,18 +18,20 @@ class Settings(BaseSettings):
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_model: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
     nvidia_disable_thinking: bool = True
+    nvidia_fallback_model: str = "meta/llama-3.2-11b-vision-instruct"
 
     # CoreWeave — self-hosted NIM / vLLM endpoint (see deploy/coreweave)
     coreweave_base_url: str = ""
     coreweave_api_key: str = ""
-    coreweave_model: str = "google/gemma-4-31B-it"
+    coreweave_model: str = "Qwen/Qwen2.5-VL-7B-Instruct"
 
     # Weights & Biases — Inference (CoreWeave-backed) + Weave tracing
     wandb_api_key: str = ""
     # "<entity>/<project>" — used for Inference usage tracking and Weave traces.
     wandb_project: str = ""
     wandb_inference_base_url: str = "https://api.inference.wandb.ai/v1"
-    wandb_inference_model: str = "google/gemma-4-31B-it"
+    wandb_inference_model: str = "meta-llama/Llama-3.1-8B-Instruct"
+    wandb_vision_enabled: bool = False
     weave_enabled: bool = True
 
     # NYC data

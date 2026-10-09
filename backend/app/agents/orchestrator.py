@@ -1,4 +1,4 @@
-"""Runs the 4-agent pipeline — dual-model vision consensus + fast primary-model tracking."""
+"""Runs the 4-agent pipeline — dual-model vision consensus + fast Primary tracking."""
 from __future__ import annotations
 
 import asyncio
@@ -60,13 +60,13 @@ _MAX_TRACK_DRIFT = 420.0
 
 class Orchestrator:
     def __init__(self) -> None:
-        # primary = vision model (NVIDIA NIM by default),
-        # secondary = comparison model (W&B Inference).
+        # Slot names kept for the UI wire format: "primary" = primary model
+        # (NVIDIA NIM by default), "secondary" = comparison model (W&B Inference).
         self.primary: LLMProvider = build_primary()
         self.secondary: Optional[LLMProvider] = build_secondary()
         self._secondary_on = bool(self.secondary and self.secondary.enabled)
 
-    async def _run_primary(
+    async def _call_primary(
         self,
         system: str,
         user: str,
@@ -87,11 +87,11 @@ class Orchestrator:
     ) -> AgentComparison:
         if compare and self.secondary is not None:
             primary_run, secondary_run = await asyncio.gather(
-                self.primary.run(system=system, user=user, image_data_uri=image_data_uri),
-                self.secondary.run(system=system, user=user, image_data_uri=image_data_uri),
+                self.primary.run(system=system, user=user, image_data_uri=image_data_uri, agent=agent),
+                self.secondary.run(system=system, user=user, image_data_uri=image_data_uri, agent=agent),
             )
             return AgentComparison(agent=agent, primary=primary_run, secondary=secondary_run)
-        run = await self._run_primary(system, user, image_data_uri)
+        run = await self.primary.run(system=system, user=user, image_data_uri=image_data_uri, agent=agent)
         return AgentComparison(agent=agent, primary=run, secondary=None)
 
     async def _vision_consensus(
@@ -102,16 +102,18 @@ class Orchestrator:
         seed_bbox: Optional[BoundingBox] = None,
     ) -> tuple[VisionResult, AgentComparison]:
         target = infer_target_class(description)
+        if not image_data_uri:
+            return VisionResult(object_label=description, detected=False, context="Frame unavailable"), AgentComparison(agent="vision")
         system = prompts.vision_system(target)
         user = prompts.vision_user(description, mode, target, seed_bbox=seed_bbox)
 
         if self._secondary_on:
             primary_run, secondary_run = await asyncio.gather(
-                self._run_primary(system, user, image_data_uri),
+                self._call_primary(system, user, image_data_uri),
                 self.secondary.run(system=system, user=user, image_data_uri=image_data_uri),
             )
         else:
-            primary_run = await self._run_primary(system, user, image_data_uri)
+            primary_run = await self._call_primary(system, user, image_data_uri)
             secondary_run = None
 
         primary_v = _safe(VisionResult, primary_run.parsed if primary_run.ok else None)
@@ -153,7 +155,7 @@ class Orchestrator:
             snap = await nyc.snapshot_data_uri(cam)
             system = prompts.vision_system(target)
             user = prompts.vision_user(req.object_description, req.mode, target)
-            run = await self._run_primary(system, user, snap)
+            run = await self._call_primary(system, user, snap)
             v = _safe(VisionResult, run.parsed if run.ok else None)
             if not v or not v.detected or not v.bounding_box:
                 continue
@@ -184,6 +186,8 @@ class Orchestrator:
         click_lock: bool = False,
     ) -> tuple[VisionResult, AgentComparison]:
         """Single-model vision for the live tracking loop (fast)."""
+        if not image_data_uri:
+            return VisionResult(object_label=description, detected=False, context="Frame unavailable"), AgentComparison(agent="vision")
         system = prompts.vision_track_system()
         user = prompts.vision_track_user(
             description,
@@ -192,7 +196,7 @@ class Orchestrator:
             continue_track=continue_track,
             click_lock=click_lock,
         )
-        run = await self._run_primary(system, user, image_data_uri)
+        run = await self._call_primary(system, user, image_data_uri)
         target = infer_target_class(description)
         parsed = _safe(VisionResult, run.parsed if run.ok else None)
         raw = parsed.model_dump() if parsed else {}
@@ -320,10 +324,10 @@ class Orchestrator:
         status = "tracking" if vision.detected else "searching"
         searching_count = 0
 
-        # Quota-aware fan-out: hosted endpoints rate-limit bursts, so we
+        # Quota-aware fan-out: the hackathon cap is 100 RPM / 100K TPM, so we
         # only scan other feeds when the object is about to leave the frame or
         # is already gone — which is also exactly when a handoff matters. While
-        # the object sits centered in view we spend just one model call/tick.
+        # the object sits centered in view we spend just one Primary call/tick.
         near_edge = bool(
             vision.detected
             and vision.bounding_box
@@ -425,18 +429,8 @@ class Orchestrator:
         )
         prediction = PredictionResult(paths=paths)
 
-        risk_items = [
-            PathRisk(
-                direction=p.direction,
-                risk_score=0.35,
-                reason="live multi-cam track",
-            )
-            for p in paths
-            if p.direction != "stop"
-        ]
-        risk: Optional[RiskResult] = (
-            RiskResult(path_risks=risk_items) if risk_items else None
-        )
+        # Tracking geometry cannot establish incident risk.
+        risk: Optional[RiskResult] = None
 
         handoff: Optional[HandoffInfo] = None
         if active_cam.id != camera.id and active_vision.detected:
@@ -498,11 +492,7 @@ class Orchestrator:
         compare_models = not req.fast
         scan = not req.fast and not req.skip_camera_scan
 
-        active = (
-            await self._resolve_camera(req, camera, all_cameras, nyc, log)
-            if scan
-            else camera
-        )
+        active = camera
         image = req.image_data_uri or await nyc.snapshot_data_uri(active)
 
         # 1. Vision — dual-model consensus (accuracy critical)
@@ -524,7 +514,12 @@ class Orchestrator:
 
         vision_dump = vision.model_dump()
 
-        # 2–4. Tracker → Prediction → Risk (primary model only, for speed)
+        if not vision.detected:
+            return WatchResponse(camera_id=camera.id, active_camera_id=active.id,
+                                 mode=req.mode, status="lost", vision=vision,
+                                 comparisons=comparisons, log=log)
+
+        # 2–4. Tracker → Prediction → Risk (Primary-only for speed)
         tcmp = await self._run_agent(
             "tracker",
             prompts.TRACKER_SYSTEM,
@@ -538,6 +533,9 @@ class Orchestrator:
             lng=active.lng,
             intersection=Intersection(roads=active.roads),
         )
+        # Anchor map positions in camera metadata rather than generated coordinates.
+        tracker.camera_id = active.id
+        tracker.lat, tracker.lng = active.lat, active.lng
         log.append(
             f"Tracker: {', '.join(tracker.intersection.roads) or active.name}"
         )
@@ -615,6 +613,7 @@ class Orchestrator:
             camera_id=camera.id,
             active_camera_id=active.id,
             mode=req.mode,
+            status="tracking" if vision.detected else "lost",
             vision=vision,
             tracker=tracker,
             prediction=prediction,
@@ -626,7 +625,7 @@ class Orchestrator:
 
 
 def _norm_conf(v: VisionResult) -> float:
-    return max(0.1, min(v.confidence, 1.0)) if v.confidence else 0.75
+    return max(0.0, min(v.confidence, 1.0))
 
 
 def clamp_bbox_from_result(v: VisionResult) -> Optional[BoundingBox]:

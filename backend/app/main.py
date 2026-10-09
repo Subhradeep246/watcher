@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import httpx
+from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +12,8 @@ from .schemas import Camera, WatchRequest, WatchResponse
 from .services.nyc_data import NYCDataService
 from .services.routing import route_on_roads
 from .tracing import init_tracing, tracing_enabled
+from .telemetry import journal, request_id
+from .services.incident_brief import build_brief
 
 settings = get_settings()
 app = FastAPI(title="TheWatcher API", version="0.1.0")
@@ -58,6 +61,11 @@ async def list_cameras() -> list[Camera]:
     return await nyc.cameras()
 
 
+@app.get("/api/telemetry")
+async def telemetry() -> dict:
+    return journal()
+
+
 @app.get("/api/cameras/{camera_id}", response_model=Camera)
 async def get_camera(camera_id: str) -> Camera:
     cam = await nyc.camera(camera_id)
@@ -72,8 +80,11 @@ async def camera_snapshot(camera_id: str) -> Response:
     cam = await nyc.camera(camera_id)
     if not cam or not cam.image_url:
         raise HTTPException(status_code=404, detail="no snapshot for camera")
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-        r = await client.get(cam.image_url)
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            r = await client.get(cam.image_url)
+    except httpx.RequestError:
+        raise HTTPException(status_code=502, detail="upstream snapshot unavailable") from None
     if r.status_code != 200:
         raise HTTPException(status_code=502, detail="upstream snapshot failed")
     return Response(
@@ -92,16 +103,28 @@ async def watch(req: WatchRequest) -> WatchResponse:
             raise HTTPException(status_code=404, detail="camera not found")
         cam = Camera(id=req.camera_id, name=f"{req.mode} feed", lat=0.0, lng=0.0)
     # Pull a live snapshot for the vision agent if the client didn't supply one.
+    source = "sample" if cam.sample_image else "client_frame" if req.image_data_uri else "nyc_dot"
     if not req.image_data_uri:
         req.image_data_uri = await nyc.snapshot_data_uri(cam)
+        source = "sample" if cam.sample_image else "nyc_dot"
+    if not req.image_data_uri:
+        source = "unavailable"
     incidents = await nyc.incidents_near(cam.lat, cam.lng)
     all_cams = await nyc.cameras()
-    return await orchestrator.run(req, cam, incidents, all_cams, nyc)
+    trace_id = uuid4().hex
+    token = request_id.set(trace_id)
+    try:
+        result = await orchestrator.run(req, cam, incidents, all_cams, nyc)
+        result.brief = build_brief(result, cam, source=source, image=req.image_data_uri,
+                                  incidents=incidents, trace_id=trace_id)
+        return result
+    finally:
+        request_id.reset(token)
 
 
 @app.post("/api/track", response_model=WatchResponse)
 async def track(req: WatchRequest) -> WatchResponse:
-    """Fast tracking tick — dual-model vision, primary-only agents, no camera scan."""
+    """Fast tracking tick — dual-model vision, Primary-only agents, no camera scan."""
     req.fast = True
     req.skip_camera_scan = True
     return await watch(req)

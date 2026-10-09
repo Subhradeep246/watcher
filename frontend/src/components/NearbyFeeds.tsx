@@ -67,7 +67,7 @@ export default function NearbyFeeds({
       <div className="nearby-panel-head">
         <span className="nearby-panel-title">Nearby cameras</span>
         <span className="nearby-panel-sub">
-          {scanning ? "AI scanning for match…" : `${nearby.length} within ${RADIUS_M}m`}
+          {scanning ? "Searching for match…" : `${nearby.length} within ${RADIUS_M}m`}
         </span>
       </div>
       <div className="nearby-grid" role="list">

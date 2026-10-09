@@ -1,4 +1,4 @@
-"""Provider abstraction + JSON extraction helpers shared by all model providers."""
+"""Provider abstraction + JSON extraction helpers shared by inference providers."""
 from __future__ import annotations
 
 import json
@@ -23,6 +23,7 @@ class LLMProvider:
         user: str,
         image_data_uri: Optional[str] = None,
         reasoning_effort: str = "default",
+        agent: str = "vision",
     ) -> ModelRun:
         raise NotImplementedError
 
